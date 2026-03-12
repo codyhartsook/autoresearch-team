@@ -1,0 +1,31 @@
+# Autoresearch Team — Lightning AI Fleet Configuration
+# All tunables for launching runners + reviewer as independent Studios.
+
+teamspace: "autoresearch-team"
+repo_url: "https://github.com/codyhartsook/autoresearch-team.git"
+repo_branch: "main"
+autoresearch_repo_url: "https://github.com/karpathy/autoresearch.git"
+
+runners:
+  count: 3
+  gpu_type: "H100"               # H100 | A100 | A10G | L4
+  studio_prefix: "runner"        # Studios named runner-0, runner-1, ...
+  command: "echo 'Runner {runner_id} started' && sleep infinity"  # Placeholder
+
+reviewer:
+  enabled: true
+  gpu_type: "CPU"
+  studio_name: "reviewer"
+  command: "echo 'Reviewer started' && sleep infinity"  # Placeholder
+
+shared_storage:
+  data_dir: "/teamspace/data"
+
+data_prep:
+  enabled: true
+  cache_dir: "/teamspace/data/.cache/autoresearch"
+  command: "uv run prepare.py"
+
+launch:
+  run_setup: true
+  stagger_seconds: 5
