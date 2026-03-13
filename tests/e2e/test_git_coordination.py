@@ -1,14 +1,13 @@
-"""Test cross-Studio coordination via a remote git repo.
+"""Test that sessions can execute scripts requiring network and git access.
 
-The autoresearch architecture uses git as the coordination layer between
-runners.  Studios are treated as independent remote machines with **no**
-shared filesystem — the only way they exchange data is by pushing to and
-pulling from a shared GitHub remote.
+These are infra provider tests — they verify the provider contract:
+- Sessions can run opaque scripts
+- Scripts have network access (can reach GitHub)
+- Scripts have git available
+- Environment variables (GH_TOKEN) are accessible inside sessions
 
-These tests verify:
-1. Both Studios can clone the same remote repo independently
-2. Studio A can push a branch; Studio B can fetch and read it
-3. Incremental commits from one Studio are visible to the other via pull
+The test hands each session a self-contained script and checks the output.
+The infra layer doesn't know or care what the script does internally.
 """
 
 from __future__ import annotations
@@ -24,260 +23,173 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(300)]
 
-# Working directory inside each Studio for git operations.
-# /tmp is per-Studio (not shared) — exactly like separate machines.
-_WORK_DIR = "/tmp/e2e-git-test"
-
-# Common git config for commits inside Studios
-_GIT_CONFIG = (
-    "git config user.email 'e2e@test.local' && "
-    "git config user.name 'E2E Test'"
-)
-
-# Tests that push to the remote need a GH_TOKEN
 _has_gh_token = bool(os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"))
-requires_push = pytest.mark.skipif(
+requires_token = pytest.mark.skipif(
     not _has_gh_token,
-    reason="Push tests require GH_TOKEN or GITHUB_TOKEN env var",
+    reason="Requires GH_TOKEN or GITHUB_TOKEN env var",
 )
 
 
-@pytest.fixture(autouse=True)
-def clean_work_dir(studio_pair):
-    """Ensure a clean working directory in both Studios before/after each test."""
-    for run_fn in (studio_pair.run_in_a, studio_pair.run_in_b):
-        run_fn(f"rm -rf {_WORK_DIR} && mkdir -p {_WORK_DIR}")
-    yield
-    for run_fn in (studio_pair.run_in_a, studio_pair.run_in_b):
-        try:
-            run_fn(f"rm -rf {_WORK_DIR}")
-        except Exception:
-            pass
+def _clone_script(repo_url: str) -> str:
+    """Script that clones a repo and prints a success marker with the HEAD sha."""
+    return f"""\
+#!/usr/bin/env bash
+set -euo pipefail
+WORKDIR=$(mktemp -d)
+cd "$WORKDIR"
+git clone --depth 1 {repo_url} repo 2>&1
+cd repo
+SHA=$(git rev-parse HEAD)
+echo "CLONE_OK sha=$SHA"
+rm -rf "$WORKDIR"
+"""
 
 
-class TestGitClone:
-    """Both Studios can independently clone the same remote repo.
+def _push_script(auth_url: str, branch: str, marker: str) -> str:
+    """Script that clones, creates a branch, commits a file, and pushes."""
+    return f"""\
+#!/usr/bin/env bash
+set -euo pipefail
+WORKDIR=$(mktemp -d)
+cd "$WORKDIR"
+git clone {auth_url} repo 2>&1
+cd repo
+git config user.email 'e2e@test.local'
+git config user.name 'E2E Test'
+git checkout -b {branch}
+echo '{marker}' > payload.txt
+git add payload.txt
+git commit -m 'e2e: {marker}' 2>&1
+git push origin {branch} 2>&1
+echo "PUSH_OK branch={branch}"
+rm -rf "$WORKDIR"
+"""
 
-    These tests are read-only — no GH_TOKEN needed for public repos.
+
+def _fetch_script(auth_url: str, branch: str) -> str:
+    """Script that clones, fetches a branch, and prints the payload file."""
+    return f"""\
+#!/usr/bin/env bash
+set -euo pipefail
+WORKDIR=$(mktemp -d)
+cd "$WORKDIR"
+git clone {auth_url} repo 2>&1
+cd repo
+git fetch origin {branch} 2>&1
+git checkout {branch}
+CONTENT=$(cat payload.txt)
+echo "FETCH_OK content=$CONTENT"
+rm -rf "$WORKDIR"
+"""
+
+
+def _cleanup_branch_script(auth_url: str, branch: str) -> str:
+    """Script that deletes a remote branch."""
+    return f"""\
+#!/usr/bin/env bash
+WORKDIR=$(mktemp -d)
+cd "$WORKDIR"
+git clone {auth_url} repo 2>&1
+cd repo
+git push origin --delete {branch} 2>&1 || true
+rm -rf "$WORKDIR"
+"""
+
+
+class TestNetworkAccess:
+    """Verify sessions can reach the network — the provider contract requires it.
+
+    Tests hand opaque scripts to sessions.  The scripts happen to use git
+    to verify network access, but the infra layer doesn't know that.
     """
 
-    def test_clone_in_studio_a(self, studio_pair, git_remote):
-        """Studio A can clone the remote repo and see commits."""
-        output = studio_pair.run_in_a(
-            f"cd {_WORK_DIR} && git clone {git_remote.public_url} repo 2>&1 && "
-            f"cd repo && git log --oneline -1"
-        )
-        assert len(output.strip()) > 0
+    def test_session_a_can_clone(self, studio_pair, git_remote):
+        """Session A executes a clone script and reports success."""
+        script = _clone_script(git_remote.public_url)
+        output = studio_pair.run_in_a(script)
+        assert "CLONE_OK" in output
 
-    def test_clone_in_studio_b(self, studio_pair, git_remote):
-        """Studio B can clone the remote repo and see commits."""
-        output = studio_pair.run_in_b(
-            f"cd {_WORK_DIR} && git clone {git_remote.public_url} repo 2>&1 && "
-            f"cd repo && git log --oneline -1"
-        )
-        assert len(output.strip()) > 0
+    def test_session_b_can_clone(self, studio_pair, git_remote):
+        """Session B executes the same clone script."""
+        script = _clone_script(git_remote.public_url)
+        output = studio_pair.run_in_b(script)
+        assert "CLONE_OK" in output
 
-    def test_both_studios_see_same_head(self, studio_pair, git_remote):
-        """Both Studios should see the same HEAD after cloning."""
-        clone_cmd = (
-            f"cd {_WORK_DIR} && git clone {git_remote.public_url} repo 2>&1 && "
-            f"cd repo && git rev-parse HEAD"
-        )
-        output_a = studio_pair.run_in_a(clone_cmd)
-        output_b = studio_pair.run_in_b(clone_cmd)
+    def test_both_sessions_see_same_state(self, studio_pair, git_remote):
+        """Both sessions running the same script get the same result."""
+        script = _clone_script(git_remote.public_url)
+        output_a = studio_pair.run_in_a(script)
+        output_b = studio_pair.run_in_b(script)
 
-        sha_a = output_a.strip().splitlines()[-1]
-        sha_b = output_b.strip().splitlines()[-1]
-        assert sha_a == sha_b, f"HEAD mismatch: A={sha_a}, B={sha_b}"
-
-    def test_ls_remote_from_both_studios(self, studio_pair, git_remote):
-        """Both Studios can ls-remote — verifying network access to the repo."""
-        output_a = studio_pair.run_in_a(
-            f"git ls-remote --heads {git_remote.public_url} 2>&1"
-        )
-        output_b = studio_pair.run_in_b(
-            f"git ls-remote --heads {git_remote.public_url} 2>&1"
-        )
-        assert "refs/heads/" in output_a, f"No refs from Studio A: {output_a}"
-        assert "refs/heads/" in output_b, f"No refs from Studio B: {output_b}"
+        # Extract sha from "CLONE_OK sha=abc123"
+        sha_a = [l for l in output_a.splitlines() if "CLONE_OK" in l][0].split("sha=")[1]
+        sha_b = [l for l in output_b.splitlines() if "CLONE_OK" in l][0].split("sha=")[1]
+        assert sha_a == sha_b, f"State mismatch: A={sha_a}, B={sha_b}"
 
 
-@requires_push
-class TestGitPushAndFetch:
-    """Studio A pushes to the remote; Studio B fetches — true remote coordination.
+@requires_token
+class TestScriptWithCredentials:
+    """Verify sessions can execute scripts that use injected credentials.
 
-    Every test goes through the real GitHub remote. No local bare repos,
-    no shared filesystem, no shortcuts. This mirrors how production runners
-    on separate machines will coordinate.
-
-    Requires GH_TOKEN with push access to the test repo.
+    The provider contract says credentials (env vars) must be accessible
+    inside sessions.  These tests verify that by running scripts that
+    require GH_TOKEN to authenticate with GitHub.
     """
 
-    def test_push_branch_a_fetch_from_b(self, studio_pair, git_remote):
-        """Studio A creates a branch with a commit and pushes it.
-        Studio B fetches and checks out that branch.
-        """
-        branch = f"e2e-branch-{studio_pair.run_id}"
-        marker = f"written-by-a-{studio_pair.run_id}"
+    def test_push_script_from_a(self, studio_pair, git_remote):
+        """Session A runs a script that pushes to a remote."""
+        branch = f"e2e-push-a-{studio_pair.run_id}"
+        marker = f"from-a-{studio_pair.run_id}"
         auth_url = git_remote.authenticated_url
 
-        # Studio A: clone, create branch, commit, push
-        studio_pair.run_in_a(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && {_GIT_CONFIG} && "
-            f"git checkout -b {branch} && "
-            f"echo '{marker}' > coordination.txt && "
-            f"git add coordination.txt && "
-            f"git commit -m 'e2e: {marker}' 2>&1 && "
-            f"git push origin {branch} 2>&1"
-        )
-
-        # Studio B: clone, fetch, checkout the branch, read the file
-        output_b = studio_pair.run_in_b(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && "
-            f"git fetch origin {branch} 2>&1 && "
-            f"git checkout {branch} && "
-            f"cat coordination.txt"
-        )
-        assert marker in output_b
-
-        # Cleanup: delete remote branch
-        try:
-            studio_pair.run_in_a(
-                f"cd {_WORK_DIR}/repo && git push origin --delete {branch} 2>&1"
-            )
-        except Exception:
-            pass
-
-    def test_push_from_b_pull_from_a(self, studio_pair, git_remote):
-        """Studio B pushes a branch; Studio A can pull it (reverse direction)."""
-        branch = f"e2e-reverse-{studio_pair.run_id}"
-        marker = f"written-by-b-{studio_pair.run_id}"
-        auth_url = git_remote.authenticated_url
-
-        # Studio B: clone, branch, commit, push
-        studio_pair.run_in_b(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && {_GIT_CONFIG} && "
-            f"git checkout -b {branch} && "
-            f"echo '{marker}' > from_b.txt && "
-            f"git add from_b.txt && "
-            f"git commit -m 'e2e: from B' 2>&1 && "
-            f"git push origin {branch} 2>&1"
-        )
-
-        # Studio A: clone, fetch, verify
-        output_a = studio_pair.run_in_a(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && "
-            f"git fetch origin {branch} 2>&1 && "
-            f"git checkout {branch} && "
-            f"cat from_b.txt"
-        )
-        assert marker in output_a
+        output = studio_pair.run_in_a(_push_script(auth_url, branch, marker))
+        assert "PUSH_OK" in output
+        assert branch in output
 
         # Cleanup
         try:
-            studio_pair.run_in_b(
-                f"cd {_WORK_DIR}/repo && git push origin --delete {branch} 2>&1"
-            )
+            studio_pair.run_in_a(_cleanup_branch_script(auth_url, branch))
         except Exception:
             pass
 
-    def test_incremental_commits_visible_via_pull(self, studio_pair, git_remote):
-        """Studio A pushes two commits incrementally; Studio B sees both via pull."""
-        branch = f"e2e-incremental-{studio_pair.run_id}"
-        marker_1 = f"first-{studio_pair.run_id}"
-        marker_2 = f"second-{studio_pair.run_id}"
+    def test_push_from_a_fetch_from_b(self, studio_pair, git_remote):
+        """Session A pushes via script; Session B fetches via script."""
+        branch = f"e2e-ab-{studio_pair.run_id}"
+        marker = f"a-to-b-{studio_pair.run_id}"
         auth_url = git_remote.authenticated_url
 
-        # Studio A: clone, create branch, first commit, push
-        studio_pair.run_in_a(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && {_GIT_CONFIG} && "
-            f"git checkout -b {branch} && "
-            f"echo '{marker_1}' > data.txt && "
-            f"git add data.txt && "
-            f"git commit -m 'first' 2>&1 && "
-            f"git push origin {branch} 2>&1"
-        )
+        # Session A pushes
+        push_output = studio_pair.run_in_a(_push_script(auth_url, branch, marker))
+        assert "PUSH_OK" in push_output
 
-        # Studio B: clone and checkout the branch — sees first commit
-        output_1 = studio_pair.run_in_b(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && "
-            f"git fetch origin {branch} 2>&1 && "
-            f"git checkout {branch} && "
-            f"cat data.txt"
-        )
-        assert marker_1 in output_1
-
-        # Studio A: second commit, push
-        studio_pair.run_in_a(
-            f"cd {_WORK_DIR}/repo && "
-            f"echo '{marker_2}' >> data.txt && "
-            f"git add data.txt && "
-            f"git commit -m 'second' 2>&1 && "
-            f"git push origin {branch} 2>&1"
-        )
-
-        # Studio B: pull — sees second marker
-        output_2 = studio_pair.run_in_b(
-            f"cd {_WORK_DIR}/repo && "
-            f"git pull origin {branch} 2>&1 && "
-            f"cat data.txt"
-        )
-        assert marker_2 in output_2
+        # Session B fetches
+        fetch_output = studio_pair.run_in_b(_fetch_script(auth_url, branch))
+        assert "FETCH_OK" in fetch_output
+        assert marker in fetch_output
 
         # Cleanup
         try:
-            studio_pair.run_in_a(
-                f"cd {_WORK_DIR}/repo && git push origin --delete {branch} 2>&1"
-            )
+            studio_pair.run_in_a(_cleanup_branch_script(auth_url, branch))
         except Exception:
             pass
 
-    def test_json_payload_round_trip(self, studio_pair, git_remote):
-        """Studio A commits a JSON file; Studio B clones and parses it.
-
-        Mirrors the real pattern: runners write structured results (JSON claims),
-        the reviewer reads them via git.
-        """
-        branch = f"e2e-json-{studio_pair.run_id}"
+    def test_push_from_b_fetch_from_a(self, studio_pair, git_remote):
+        """Reverse direction — Session B pushes, Session A fetches."""
+        branch = f"e2e-ba-{studio_pair.run_id}"
+        marker = f"b-to-a-{studio_pair.run_id}"
         auth_url = git_remote.authenticated_url
 
-        # Studio A: commit a JSON payload
-        studio_pair.run_in_a(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && {_GIT_CONFIG} && "
-            f"git checkout -b {branch} && "
-            f"python3 -c \""
-            f"import json; json.dump({{'run_id': '{studio_pair.run_id}', "
-            f"'source': 'studio_a', 'confidence': 0.95}}, "
-            f"open('claim.json', 'w'))\" && "
-            f"git add claim.json && "
-            f"git commit -m 'e2e: json claim' 2>&1 && "
-            f"git push origin {branch} 2>&1"
-        )
+        # Session B pushes
+        push_output = studio_pair.run_in_b(_push_script(auth_url, branch, marker))
+        assert "PUSH_OK" in push_output
 
-        # Studio B: clone, checkout, parse
-        output_b = studio_pair.run_in_b(
-            f"cd {_WORK_DIR} && git clone {auth_url} repo 2>&1 && "
-            f"cd repo && "
-            f"git fetch origin {branch} 2>&1 && "
-            f"git checkout {branch} && "
-            f"python3 -c \""
-            f"import json; d = json.load(open('claim.json')); "
-            f"print(d['run_id']); print(d['confidence'])\""
-        )
-        assert studio_pair.run_id in output_b
-        assert "0.95" in output_b
+        # Session A fetches
+        fetch_output = studio_pair.run_in_a(_fetch_script(auth_url, branch))
+        assert "FETCH_OK" in fetch_output
+        assert marker in fetch_output
 
         # Cleanup
         try:
-            studio_pair.run_in_a(
-                f"cd {_WORK_DIR}/repo && git push origin --delete {branch} 2>&1"
-            )
+            studio_pair.run_in_b(_cleanup_branch_script(auth_url, branch))
         except Exception:
             pass

@@ -1,42 +1,27 @@
-# Autoresearch Team — Lightning AI Fleet Configuration
-# All tunables for launching runners + reviewer as independent Studios.
+# Lightning AI Fleet Configuration
+#
+# Provider-specific tunables only. This file controls how Studios are
+# provisioned on Lightning AI — machine types, teamspace, launch behavior.
+#
+# Architecture concerns (which repos to clone, how agents coordinate) are
+# NOT configured here. Those are passed in via the setup/main commands and
+# environment variables. See infra/PROVIDER_CONTRACT.md.
 
 teamspace: "chartsoo"
 org: ""                           # Lightning AI org that owns the teamspace (leave empty to auto-detect)
-
-# ---------------------------------------------------------------------------
-# Source repos — cloned into each Studio during setup (studio_setup.sh)
-# ---------------------------------------------------------------------------
-repo_url: "https://github.com/codyhartsook/autoresearch-team.git"
-repo_branch: "main"
-autoresearch_repo_url: "https://github.com/karpathy/autoresearch.git"
-
-# ---------------------------------------------------------------------------
-# Coordination repo — the shared git remote that runners use to exchange work.
-#
-# In production this is the autoresearch repo.  Each runner creates experiment
-# branches, pushes results, and the reviewer fetches across branches to
-# evaluate.  All cross-machine coordination goes through this repo — there
-# is no shared filesystem between Studios.
-#
-# The GH_TOKEN env var must have push access to this repo.
-# ---------------------------------------------------------------------------
-coordination_repo:
-  url: "https://github.com/codyhartsook/autoresearch-team-test-repo.git"
-  branch: "main"
 
 runners:
   count: 3
   gpu_type: "H100"               # H100 | A100 | A10G | L4
   studio_prefix: "runner"        # Studios named runner-0, runner-1, ...
-  command: "echo 'Runner {runner_id} started' && sleep infinity"  # Placeholder
+  command: "echo 'Runner {runner_id} started' && sleep infinity"  # Placeholder — replaced by real runner command
 
 reviewer:
   enabled: true
   gpu_type: "CPU"
   studio_name: "reviewer"
-  command: "echo 'Reviewer started' && sleep infinity"  # Placeholder
+  command: "echo 'Reviewer started' && sleep infinity"  # Placeholder — replaced by real reviewer command
 
 launch:
-  run_setup: true
-  stagger_seconds: 5
+  run_setup: true                 # Run studio_setup.sh on each Studio before main command
+  stagger_seconds: 5              # Delay between Studio launches (avoids API rate limits)

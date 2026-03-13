@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # studio_setup.sh — Idempotent environment provisioning for Lightning Studios.
 #
-# Runs inside each Studio (runner or reviewer).  Every operation is
-# check-before-act so re-runs skip gracefully.
+# Installs tools and sets up the workspace. Repo URLs and branches are
+# passed in via environment variables by the caller (launch.py), not
+# hardcoded here — keeping the infra layer free of architecture knowledge.
+#
+# Required env vars:
+#   ART_TEAM_REPO       — autoresearch-team repo URL
+#   ART_TEAM_BRANCH     — branch to clone (default: main)
+#   ART_AUTORESEARCH_REPO — karpathy/autoresearch repo URL
 #
 # Usage:  bash studio_setup.sh
 # ---------------------------------------------------------------
 set -euo pipefail
 
-TEAM_REPO="${ART_TEAM_REPO:-https://github.com/codyhartsook/autoresearch-team.git}"
+TEAM_REPO="${ART_TEAM_REPO:?ART_TEAM_REPO env var is required}"
 TEAM_BRANCH="${ART_TEAM_BRANCH:-main}"
-AUTORESEARCH_REPO="${ART_AUTORESEARCH_REPO:-https://github.com/karpathy/autoresearch.git}"
+AUTORESEARCH_REPO="${ART_AUTORESEARCH_REPO:?ART_AUTORESEARCH_REPO env var is required}"
 WORKSPACE="/teamspace/studios/this_studio"
 
 echo "=== Autoresearch Studio Setup ==="

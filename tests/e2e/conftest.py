@@ -37,7 +37,6 @@ _CONFIG_PATH = Path(__file__).parent / "config_e2e.yaml"
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 _RUN_ID = os.environ.get("E2E_RUN_ID", uuid.uuid4().hex[:8])
-_CONFIG_PATH = Path(__file__).parent / "config_e2e.yaml"
 
 
 # ---------------------------------------------------------------------------
