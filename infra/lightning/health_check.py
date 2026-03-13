@@ -16,9 +16,11 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
+from infra.lightning.config import studio_kwargs
+
 console = Console()
 
-# A Studio that hasn't written to shared storage in this many seconds is "stale".
+# A Studio that hasn't had activity in this many seconds is "stale".
 _STALE_THRESHOLD_SECONDS = 30 * 60  # 30 minutes
 
 
@@ -63,7 +65,7 @@ def _status_badge(status: str) -> str:
     return f"[dim]{status}[/dim]"
 
 
-def _query_studio(name: str, teamspace: str) -> dict[str, str]:
+def _query_studio(cfg: dict[str, Any], name: str) -> dict[str, str]:
     """Query a single Studio's status via the Lightning SDK.
 
     Returns a dict with keys: status, last_activity, uptime.
@@ -72,7 +74,7 @@ def _query_studio(name: str, teamspace: str) -> dict[str, str]:
     try:
         from lightning_sdk import Studio  # type: ignore[import-untyped]
 
-        studio = Studio(name=name, teamspace=teamspace)
+        studio = Studio(**studio_kwargs(cfg, name))
         status = str(getattr(studio, "status", "unknown"))
         # Best-effort: the SDK may not expose these directly
         last_activity = str(getattr(studio, "last_activity", "-"))
@@ -87,7 +89,6 @@ def _query_studio(name: str, teamspace: str) -> dict[str, str]:
 def _build_table(cfg: dict[str, Any]) -> Table:
     """Query all Studios and return a rich Table."""
     specs = _studio_specs(cfg)
-    teamspace = cfg["teamspace"]
     now_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     table = Table(
@@ -101,7 +102,7 @@ def _build_table(cfg: dict[str, Any]) -> Table:
     table.add_column("Uptime", style="dim")
 
     for spec in specs:
-        info = _query_studio(spec["name"], teamspace)
+        info = _query_studio(cfg, spec["name"])
         table.add_row(
             spec["name"],
             spec["gpu_type"],

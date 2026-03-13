@@ -1,10 +1,29 @@
 # Autoresearch Team — Lightning AI Fleet Configuration
 # All tunables for launching runners + reviewer as independent Studios.
 
-teamspace: "autoresearch-team"
+teamspace: "chartsoo"
+org: ""                           # Lightning AI org that owns the teamspace (leave empty to auto-detect)
+
+# ---------------------------------------------------------------------------
+# Source repos — cloned into each Studio during setup (studio_setup.sh)
+# ---------------------------------------------------------------------------
 repo_url: "https://github.com/codyhartsook/autoresearch-team.git"
 repo_branch: "main"
 autoresearch_repo_url: "https://github.com/karpathy/autoresearch.git"
+
+# ---------------------------------------------------------------------------
+# Coordination repo — the shared git remote that runners use to exchange work.
+#
+# In production this is the autoresearch repo.  Each runner creates experiment
+# branches, pushes results, and the reviewer fetches across branches to
+# evaluate.  All cross-machine coordination goes through this repo — there
+# is no shared filesystem between Studios.
+#
+# The GH_TOKEN env var must have push access to this repo.
+# ---------------------------------------------------------------------------
+coordination_repo:
+  url: "https://github.com/codyhartsook/autoresearch-team-test-repo.git"
+  branch: "main"
 
 runners:
   count: 3
@@ -17,14 +36,6 @@ reviewer:
   gpu_type: "CPU"
   studio_name: "reviewer"
   command: "echo 'Reviewer started' && sleep infinity"  # Placeholder
-
-shared_storage:
-  data_dir: "/teamspace/data"
-
-data_prep:
-  enabled: true
-  cache_dir: "/teamspace/data/.cache/autoresearch"
-  command: "uv run prepare.py"
 
 launch:
   run_setup: true

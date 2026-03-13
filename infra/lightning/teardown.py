@@ -15,6 +15,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm
 from rich.table import Table
 
+from infra.lightning.config import studio_kwargs
+
 console = Console()
 
 
@@ -119,7 +121,7 @@ def teardown_fleet(cfg: dict[str, Any], *, mode: str = "all", delete: bool = Fal
             )
 
             try:
-                studio = Studio(name=spec["name"], teamspace=cfg["teamspace"])
+                studio = Studio(**studio_kwargs(cfg, spec["name"]))
                 if delete:
                     studio.delete()
                     results.append({**spec, "action": "deleted", "status": "ok"})

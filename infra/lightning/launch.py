@@ -17,6 +17,8 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from infra.lightning.config import studio_kwargs
+
 console = Console()
 
 # Map config GPU names → lightning_sdk Machine enum members.
@@ -148,7 +150,18 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
     # ---- Real launch ----
     stagger = cfg.get("launch", {}).get("stagger_seconds", 0)
     run_setup = cfg.get("launch", {}).get("run_setup", True)
-    setup_script = _SETUP_SCRIPT.read_text() if run_setup and _SETUP_SCRIPT.exists() else None
+    setup_script_raw = _SETUP_SCRIPT.read_text() if run_setup and _SETUP_SCRIPT.exists() else None
+
+    # Inject config values as env vars so studio_setup.sh can read them
+    if setup_script_raw:
+        env_prefix = (
+            f'export ART_TEAM_REPO="{cfg.get("repo_url", "")}"\n'
+            f'export ART_TEAM_BRANCH="{cfg.get("repo_branch", "main")}"\n'
+            f'export ART_AUTORESEARCH_REPO="{cfg.get("autoresearch_repo_url", "")}"\n'
+        )
+        setup_script: str | None = env_prefix + setup_script_raw
+    else:
+        setup_script = None
     results: list[dict[str, Any]] = []
 
     try:
@@ -170,7 +183,7 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
 
             try:
                 machine = getattr(Machine, MACHINE_MAP[spec["gpu_type"]])
-                studio = Studio(name=spec["name"], teamspace=cfg["teamspace"])
+                studio = Studio(**studio_kwargs(cfg, spec["name"]))
                 studio.start(machine=machine)
 
                 if setup_script:

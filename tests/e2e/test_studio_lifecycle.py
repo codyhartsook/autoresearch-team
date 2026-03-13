@@ -51,15 +51,9 @@ class TestBasicCommand:
         _output, exit_code = studio_pair.run_in_a_with_exit_code("false")
         assert exit_code != 0
 
-    def test_shared_data_dir_exists(self, studio_pair):
-        """The shared teamspace data directory must exist in both Studios."""
-        data_dir = studio_pair.shared_data_dir
-
-        output_a, rc_a = studio_pair.run_in_a_with_exit_code(
-            f"test -d {data_dir} && echo exists"
-        )
-        output_b, rc_b = studio_pair.run_in_b_with_exit_code(
-            f"test -d {data_dir} && echo exists"
-        )
-        assert rc_a == 0 and "exists" in output_a, f"Studio A: {data_dir} not found"
-        assert rc_b == 0 and "exists" in output_b, f"Studio B: {data_dir} not found"
+    def test_git_is_available(self, studio_pair):
+        """git must be available in both Studios for coordination."""
+        output_a, rc_a = studio_pair.run_in_a_with_exit_code("git --version")
+        output_b, rc_b = studio_pair.run_in_b_with_exit_code("git --version")
+        assert rc_a == 0 and "git version" in output_a, "git not found in Studio A"
+        assert rc_b == 0 and "git version" in output_b, "git not found in Studio B"

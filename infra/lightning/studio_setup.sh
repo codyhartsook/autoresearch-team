@@ -2,18 +2,15 @@
 # studio_setup.sh — Idempotent environment provisioning for Lightning Studios.
 #
 # Runs inside each Studio (runner or reviewer).  Every operation is
-# check-before-act so the first Studio to run creates shared resources
-# and subsequent Studios skip gracefully.
+# check-before-act so re-runs skip gracefully.
 #
 # Usage:  bash studio_setup.sh
 # ---------------------------------------------------------------
 set -euo pipefail
 
-DATA_DIR="/teamspace/data"
-CACHE_DIR="${DATA_DIR}/.cache/autoresearch"
-TEAM_REPO="https://github.com/codyhartsook/autoresearch-team.git"
-TEAM_BRANCH="main"
-AUTORESEARCH_REPO="https://github.com/karpathy/autoresearch.git"
+TEAM_REPO="${ART_TEAM_REPO:-https://github.com/codyhartsook/autoresearch-team.git}"
+TEAM_BRANCH="${ART_TEAM_BRANCH:-main}"
+AUTORESEARCH_REPO="${ART_AUTORESEARCH_REPO:-https://github.com/karpathy/autoresearch.git}"
 WORKSPACE="/teamspace/studios/this_studio"
 
 echo "=== Autoresearch Studio Setup ==="
@@ -93,35 +90,7 @@ elif [ -f "requirements.txt" ]; then
     echo "[✓] autoresearch requirements installed"
 fi
 
-# ---------------------------------------------------------------
-# 5. Initialize shared knowledge store (first Studio creates, rest skip)
-# ---------------------------------------------------------------
-echo "[…] Ensuring shared knowledge store directories exist..."
-
-mkdir -p "${DATA_DIR}/claims"
-mkdir -p "${DATA_DIR}/rounds"
-mkdir -p "${CACHE_DIR}"
-
-# Create empty JSONL files if they don't exist (first-writer wins)
-for f in leaderboard.jsonl dead_ends.jsonl insights.jsonl; do
-    filepath="${DATA_DIR}/${f}"
-    if [ ! -f "${filepath}" ]; then
-        touch "${filepath}"
-        echo "[✓] Created ${filepath}"
-    else
-        echo "[✓] ${filepath} already exists"
-    fi
-done
-
-# Create empty human directive placeholder
-if [ ! -f "${DATA_DIR}/human_directive.json" ]; then
-    echo '{}' > "${DATA_DIR}/human_directive.json"
-    echo "[✓] Created ${DATA_DIR}/human_directive.json"
-fi
-
 echo ""
 echo "=== Setup Complete ==="
-echo "  Data dir:    ${DATA_DIR}"
-echo "  Team repo:   ${TEAM_DIR}"
+echo "  Team repo:    ${TEAM_DIR}"
 echo "  Autoresearch: ${AUTORESEARCH_DIR}"
-echo "  Cache:       ${CACHE_DIR}"

@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
@@ -86,19 +87,23 @@ def _check_lightning_auth() -> dict[str, Any]:
     }
 
 
-def _load_dotenv_if_exists() -> None:
-    """Best-effort: source .env into os.environ so checks see values from it."""
-    if not _ENV_FILE.exists():
-        return
-    for line in _ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip("\"'")
-        if key and val:
-            os.environ.setdefault(key, val)
+def _check_gh_token() -> dict[str, Any]:
+    """Check for a GitHub token (GH_TOKEN or GITHUB_TOKEN).
+
+    Used for git-based coordination between runners — pushing branches,
+    creating repos, etc.
+    """
+    for var in ("GH_TOKEN", "GITHUB_TOKEN"):
+        val = os.environ.get(var, "")
+        if val:
+            masked = "•" * max(0, len(val) - 4) + val[-4:] if len(val) > 4 else "•" * len(val)
+            return {"name": "GitHub token", "found": True, "detail": f"{var}: {masked}"}
+    return {
+        "name": "GitHub token",
+        "found": False,
+        "detail": "GH_TOKEN / GITHUB_TOKEN not set",
+    }
+
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +198,27 @@ def _prompt_anthropic_key() -> dict[str, str]:
     return {}
 
 
+def _prompt_gh_token() -> dict[str, str]:
+    """Interactively collect a GitHub personal access token."""
+    console.print()
+    console.print(
+        Panel(
+            "A GitHub token is used for git-based coordination between runners.\n"
+            "Runners push/pull branches to share results via a shared repo.\n\n"
+            "Create a token at [link=https://github.com/settings/tokens]github.com/settings/tokens[/link]\n"
+            "Required scopes: [bold]repo[/bold]",
+            title="[bold yellow]GitHub Token[/bold yellow]",
+            border_style="yellow",
+        )
+    )
+
+    key = Prompt.ask("  GH_TOKEN (or press Enter to skip)", default="", password=True)
+    if key:
+        return {"GH_TOKEN": key}
+    console.print("[dim]Skipped GitHub token.[/dim]")
+    return {}
+
+
 def _write_env_file(env_vars: dict[str, str]) -> None:
     """Append key=value pairs to .env, creating if needed."""
     if not env_vars:
@@ -267,13 +293,14 @@ def run_wizard(*, check_only: bool = False) -> None:
     )
 
     # Load .env early so checks can see values from it
-    _load_dotenv_if_exists()
+    load_dotenv(_ENV_FILE)
 
     # ── Run all checks ──────────────────────────────────────────────
     #   uv          – runs everything (uv sync, uv run art …)
     #   git         – studio_setup.sh clones repos
     #   Lightning   – SDK auth for Studio create/start/stop
     #   Anthropic   – Claude Code agents inside Studios
+    #   GH_TOKEN    – git-based coordination (push/pull between runners)
     #   claude      – Claude Code CLI runs inside Studios
     checks: list[dict[str, Any]] = []
 
@@ -281,6 +308,7 @@ def run_wizard(*, check_only: bool = False) -> None:
     checks.append(_check_tool("git"))
     checks.append(_check_lightning_auth())
     checks.append(_check_env_var("ANTHROPIC_API_KEY"))
+    checks.append(_check_gh_token())
     checks.append(_check_tool("claude", test_cmd="claude --version"))
 
     console.print()
@@ -325,6 +353,11 @@ def run_wizard(*, check_only: bool = False) -> None:
     if not anthropic_check["found"]:
         env_vars.update(_prompt_anthropic_key())
 
+    # GitHub token
+    gh_check = next(c for c in checks if c["name"] == "GitHub token")
+    if not gh_check["found"]:
+        env_vars.update(_prompt_gh_token())
+
     # Write .env
     if env_vars:
         console.print()
@@ -345,6 +378,7 @@ def run_wizard(*, check_only: bool = False) -> None:
     final_checks.append(_check_tool("git"))
     final_checks.append(_check_lightning_auth())
     final_checks.append(_check_env_var("ANTHROPIC_API_KEY"))
+    final_checks.append(_check_gh_token())
     final_checks.append(_check_tool("claude", test_cmd="claude --version"))
 
     console.print(_results_table(final_checks, title="Final Status"))
