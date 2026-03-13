@@ -4,11 +4,11 @@ Single entry point ``art`` with subcommands: init, launch, teardown, health.
 
 Usage::
 
-    uv run art init                  # setup wizard
-    uv run art init --check          # non-interactive env check
-    uv run art launch --dry-run
-    uv run art health --watch
-    uv run art teardown
+    art init                  # setup wizard
+    art init --check          # non-interactive env check
+    art launch --dry-run
+    art health --watch
+    art teardown
 """
 
 from __future__ import annotations

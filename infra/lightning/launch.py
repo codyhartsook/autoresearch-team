@@ -222,8 +222,8 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
         console.print(
             Panel(
                 "All Studios launched successfully.\n\n"
-                "  • Run [bold]uv run art health[/bold] to check status.\n"
-                "  • Run [bold]uv run art teardown[/bold] to stop the fleet.",
+                "  • Run [bold]art health[/bold] to check status.\n"
+                "  • Run [bold]art teardown[/bold] to stop the fleet.",
                 title="[green]Next steps[/green]",
                 border_style="green",
             )
@@ -389,8 +389,8 @@ def launch_sessions(cfg: dict[str, Any], *, dry_run: bool = False) -> None:
         console.print(
             Panel(
                 "All sessions launched successfully.\n\n"
-                "  • Run [bold]uv run art health[/bold] to check status.\n"
-                "  • Run [bold]uv run art teardown[/bold] to stop sessions.",
+                "  • Run [bold]art health[/bold] to check status.\n"
+                "  • Run [bold]art teardown[/bold] to stop sessions.",
                 title="[green]Next steps[/green]",
                 border_style="green",
             )

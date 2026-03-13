@@ -157,5 +157,5 @@ def check_health(cfg: dict[str, Any], *, watch: bool = False, interval: int = 30
         console.print(_build_table(cfg))
         console.print()
         console.print(
-            "[dim]Tip: run [bold]uv run art health --watch[/bold] for continuous monitoring.[/dim]"
+            "[dim]Tip: run [bold]art health --watch[/bold] for continuous monitoring.[/dim]"
         )

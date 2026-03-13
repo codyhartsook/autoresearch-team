@@ -5,8 +5,8 @@ a ``.env`` file so subsequent ``art`` commands Just Work.
 
 Run via::
 
-    uv run art init              # interactive wizard
-    uv run art init --check      # non-interactive check only (CI-friendly)
+    art init              # interactive wizard
+    art init --check      # non-interactive check only (CI-friendly)
 """
 
 from __future__ import annotations
@@ -296,7 +296,7 @@ def run_wizard(*, check_only: bool = False) -> None:
     load_dotenv(_ENV_FILE)
 
     # ── Run all checks ──────────────────────────────────────────────
-    #   uv          – runs everything (uv sync, uv run art …)
+    #   uv          – runs everything (uv sync, art …)
     #   git         – studio_setup.sh clones repos
     #   Lightning   – SDK auth for Studio create/start/stop
     #   Anthropic   – Claude Code agents inside Studios
@@ -321,8 +321,8 @@ def run_wizard(*, check_only: bool = False) -> None:
         console.print(
             Panel(
                 "All checks passed.  You're ready to go!\n\n"
-                "  [bold]uv run art launch --dry-run[/bold]   preview the fleet\n"
-                "  [bold]uv run art launch[/bold]             launch it",
+                "  [bold]art launch --dry-run[/bold]   preview the fleet\n"
+                "  [bold]art launch[/bold]             launch it",
                 title="[bold green]Ready[/bold green]",
                 border_style="green",
             )
@@ -335,7 +335,7 @@ def run_wizard(*, check_only: bool = False) -> None:
         if missing:
             console.print(
                 f"[bold red]{len(missing)} required item(s) missing.[/bold red]  "
-                "Run [bold]uv run art init[/bold] (without --check) to fix interactively."
+                "Run [bold]art init[/bold] (without --check) to fix interactively."
             )
             raise SystemExit(1)
         return
@@ -389,7 +389,7 @@ def run_wizard(*, check_only: bool = False) -> None:
         console.print(
             Panel(
                 "Some items are still missing — see the table above.\n"
-                "You can re-run [bold]uv run art init[/bold] any time.",
+                "You can re-run [bold]art init[/bold] any time.",
                 title="[yellow]Incomplete[/yellow]",
                 border_style="yellow",
             )
@@ -398,8 +398,8 @@ def run_wizard(*, check_only: bool = False) -> None:
         console.print(
             Panel(
                 "Setup complete!  Next steps:\n\n"
-                "  [bold]uv run art launch --dry-run[/bold]   preview the fleet\n"
-                "  [bold]uv run art launch[/bold]             launch it",
+                "  [bold]art launch --dry-run[/bold]   preview the fleet\n"
+                "  [bold]art launch[/bold]             launch it",
                 title="[bold green]Ready[/bold green]",
                 border_style="green",
             )

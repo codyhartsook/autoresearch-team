@@ -10,46 +10,63 @@ runners + reviewer config.
 - `LIGHTNING_API_KEY` set in your environment (or authenticated via `lightning login`)
 - `GH_TOKEN` or `GITHUB_TOKEN` with `repo` scope for git-based coordination
 
-## Quick Start
+## Installation
 
 ```bash
 # Install uv (if needed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install dependencies
+# Create venv and install the package (from the repo root)
 uv sync
 
+# Activate the virtual environment so `art` is on your PATH
+source .venv/bin/activate    # macOS / Linux
+# .venv\Scripts\activate     # Windows
+
+# Verify
+art --help
+```
+
+After activation, the `art` command is available directly in your shell.
+
+> **Tip:** If you prefer not to activate the venv, `uv run art <command>` works
+> without any install step — uv resolves dependencies and runs the entry point
+> on the fly.
+
+## Quick Start
+
+```bash
 # Run the setup wizard — checks creds, tools, writes .env
-uv run art init
+art init
 
 # Preview the fleet (no Studios launched)
-uv run art launch --dry-run
+art launch --dry-run
 
 # Launch from the legacy config (3 runners + 1 reviewer)
-uv run art launch
+art launch
 
 # Launch from a session YAML file
-uv run art launch --file sessions.example.yaml
+art launch --file sessions.example.yaml
 
 # Preview the session file launch
-uv run art launch --file sessions.example.yaml --dry-run
+art launch --file sessions.example.yaml --dry-run
 
 # Check status
-uv run art health
+art health
 
 # Continuous monitoring
-uv run art health --watch
+art health --watch
 
 # Stop everything
-uv run art teardown
+art teardown
 
 # Permanently delete Studios
-uv run art teardown --delete
+art teardown --delete
 ```
 
 ## Setup Wizard
 
-Run `uv run art init` before your first launch. The wizard checks for:
+Run `art init` before your first launch. The wizard checks for:
 
 | Check | Required? | How to fix |
 |-------|-----------|------------|
@@ -65,7 +82,7 @@ The wizard can write credentials to a `.env` file (auto-added to `.gitignore`).
 For CI or non-interactive environments, use the check-only mode:
 
 ```bash
-uv run art init --check    # exits 1 if required items are missing
+art init --check    # exits 1 if required items are missing
 ```
 
 ## Configuration
@@ -116,19 +133,19 @@ separation between infra and architecture concerns.
 
 ```bash
 # Launch from a session file
-uv run art launch --file sessions.yaml
+art launch --file sessions.yaml
 
 # Launch from a session file (dry run)
-uv run art launch --file sessions.yaml --dry-run
+art launch --file sessions.yaml --dry-run
 
 # Legacy: launch 1 runner on an A10G (cheaper for testing)
-uv run art launch --mode runners --runners 1 --gpu A10G
+art launch --mode runners --runners 1 --gpu A10G
 
 # Legacy: launch only the reviewer
-uv run art launch --mode reviewer
+art launch --mode reviewer
 
 # Use a custom global config file
-uv run art --config my-config.yaml launch
+art --config my-config.yaml launch
 ```
 
 ## Role in the stack
@@ -184,7 +201,7 @@ All cross-studio data exchange goes through a real GitHub remote.
 
 ### Prerequisites
 
-- Lightning AI auth configured (`uv run art init` or env vars)
+- Lightning AI auth configured (`art init` or env vars)
 - No GPU required — all tests use `Machine.CPU`
 - `GH_TOKEN` or `GITHUB_TOKEN` env var with `repo` scope (for git push tests)
 - `gh` CLI installed (for auto-creating temporary repos, unless using an existing repo)
@@ -213,17 +230,17 @@ uv sync --extra test
 export GH_TOKEN="ghp_..."
 
 # Run the full e2e suite (~3-5 min, dominated by Studio startup)
-uv run pytest tests/e2e/ -v --tb=short -s --log-cli-level=INFO
+pytest tests/e2e/ -v --tb=short -s --log-cli-level=INFO
 
 # Run a single test module
-uv run pytest tests/e2e/test_studio_lifecycle.py -v -s
+pytest tests/e2e/test_studio_lifecycle.py -v -s
 
 # Use an existing repo instead of auto-creating
 E2E_TEST_REPO_URL=https://github.com/you/repo.git \
-  uv run pytest tests/e2e/test_git_coordination.py -v -s
+  pytest tests/e2e/test_git_coordination.py -v -s
 
 # Skip e2e tests (for fast unit test runs later)
-uv run pytest -m "not e2e"
+pytest -m "not e2e"
 ```
 
 ### What the tests do
