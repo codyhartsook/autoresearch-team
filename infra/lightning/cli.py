@@ -57,6 +57,13 @@ def init(ctx: click.Context, check: bool) -> None:
 
 @cli.command()
 @click.option(
+    "--file",
+    "session_file",
+    type=click.Path(exists=True),
+    default=None,
+    help="Session YAML file (alternative to --mode/--runners/--gpu).",
+)
+@click.option(
     "--mode",
     type=click.Choice(["all", "runners", "reviewer"]),
     default="all",
@@ -71,12 +78,32 @@ def init(ctx: click.Context, check: bool) -> None:
 )
 @click.option("--dry-run", is_flag=True, help="Preview the fleet without launching.")
 @click.pass_context
-def launch(ctx: click.Context, mode: str, runners: int | None, gpu: str | None, dry_run: bool) -> None:
-    """Launch the autoresearch fleet (runners + reviewer Studios)."""
-    from infra.lightning.launch import launch_fleet
+def launch(
+    ctx: click.Context,
+    session_file: str | None,
+    mode: str,
+    runners: int | None,
+    gpu: str | None,
+    dry_run: bool,
+) -> None:
+    """Launch the autoresearch fleet (runners + reviewer Studios).
 
-    cfg = apply_overrides(_get_config(ctx), runners=runners, gpu=gpu)
-    launch_fleet(cfg, mode=mode, dry_run=dry_run)
+    Use --file to provide a session YAML file instead of the global config.
+    """
+    if session_file:
+        # New path: launch from session file
+        from infra.lightning.config import load_session_config
+        from infra.lightning.launch import launch_sessions
+
+        base_cfg = _get_config(ctx)
+        cfg = load_session_config(session_file, base_cfg=base_cfg)
+        launch_sessions(cfg, dry_run=dry_run)
+    else:
+        # Legacy path: runners/reviewer from global config
+        from infra.lightning.launch import launch_fleet
+
+        cfg = apply_overrides(_get_config(ctx), runners=runners, gpu=gpu)
+        launch_fleet(cfg, mode=mode, dry_run=dry_run)
 
 
 @cli.command()

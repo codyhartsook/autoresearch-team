@@ -131,6 +131,112 @@ def _resolve_lightning_org() -> str:
     return ""
 
 
+_REQUIRED_SESSION = {"name", "count", "gpu_type", "command"}
+
+
+def load_session_config(path: str | Path, base_cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Load a sessions YAML file.
+
+    Merges provider settings (teamspace, org) from *base_cfg* if not
+    present in the session file.
+
+    Parameters
+    ----------
+    path : str | Path
+        Path to a sessions YAML file.
+    base_cfg : dict | None
+        Optional base configuration (typically from :func:`load_config`)
+        used as fallback for ``teamspace`` and ``org``.
+
+    Returns
+    -------
+    dict
+        Merged config dict with a validated ``sessions`` list.
+    """
+    session_path = Path(path)
+    if not session_path.exists():
+        raise FileNotFoundError(f"Session file not found: {session_path}")
+
+    with open(session_path) as f:
+        cfg: dict[str, Any] = yaml.safe_load(f) or {}
+
+    # Validate that a sessions list is present
+    sessions = cfg.get("sessions")
+    if not sessions or not isinstance(sessions, list):
+        raise ValueError(f"{session_path}: must contain a 'sessions' list")
+
+    for idx, group in enumerate(sessions):
+        missing = _REQUIRED_SESSION - set(group)
+        if missing:
+            raise ValueError(
+                f"{session_path}: sessions[{idx}] missing keys: {missing}"
+            )
+
+    # Merge provider settings from base config when absent
+    if base_cfg:
+        if "teamspace" not in cfg and "teamspace" in base_cfg:
+            cfg["teamspace"] = base_cfg["teamspace"]
+        if "org" not in cfg and "org" in base_cfg:
+            cfg["org"] = base_cfg["org"]
+        if "user" not in cfg and "user" in base_cfg:
+            cfg["user"] = base_cfg["user"]
+        if "launch" not in cfg and "launch" in base_cfg:
+            cfg["launch"] = base_cfg["launch"]
+        # Also carry over repo settings for setup script env vars
+        for key in ("repo_url", "repo_branch", "autoresearch_repo_url"):
+            if key not in cfg and key in base_cfg:
+                cfg[key] = base_cfg[key]
+
+    # Allow env var to override / supply the Lightning org
+    env_org = os.environ.get("LIGHTNING_ORG", "")
+    if env_org:
+        cfg["org"] = env_org
+
+    if "teamspace" not in cfg:
+        raise ValueError(
+            f"{session_path}: 'teamspace' must be set in the session file "
+            "or in the base config"
+        )
+
+    return cfg
+
+
+def session_specs(cfg: dict[str, Any], only: str | None = None) -> list[dict[str, Any]]:
+    """Flatten sessions list into individual Studio specs.
+
+    Each session group ``{name, count, gpu_type, command}`` expands to
+    ``count`` specs named ``{name}-0``, ``{name}-1``, etc.
+
+    Parameters
+    ----------
+    cfg : dict
+        Config dict containing a ``sessions`` list (from
+        :func:`load_session_config`).
+    only : str | None
+        If provided, filter to the session group with this name.
+
+    Returns
+    -------
+    list[dict]
+        One dict per individual session with keys: ``name``, ``gpu_type``,
+        ``command``, ``group``.
+    """
+    specs: list[dict[str, Any]] = []
+    for group in cfg.get("sessions", []):
+        if only and group["name"] != only:
+            continue
+        for i in range(group["count"]):
+            specs.append(
+                {
+                    "name": f"{group['name']}-{i}",
+                    "gpu_type": group["gpu_type"],
+                    "command": group["command"].format(i=i),
+                    "group": group["name"],
+                }
+            )
+    return specs
+
+
 def _resolve_lightning_username() -> str:
     """Best-effort: get the current Lightning AI username.
 

@@ -1,6 +1,7 @@
 # Autoresearch Team — Lightning AI Infrastructure
 
-Launch N GPU runners + 1 CPU reviewer as independent Lightning AI Studios.
+Launch independent Lightning AI Studios from a session YAML file or the legacy
+runners + reviewer config.
 
 ## Prerequisites
 
@@ -24,8 +25,14 @@ uv run art init
 # Preview the fleet (no Studios launched)
 uv run art launch --dry-run
 
-# Launch the full fleet (3 runners + 1 reviewer)
+# Launch from the legacy config (3 runners + 1 reviewer)
 uv run art launch
+
+# Launch from a session YAML file
+uv run art launch --file sessions.example.yaml
+
+# Preview the session file launch
+uv run art launch --file sessions.example.yaml --dry-run
 
 # Check status
 uv run art health
@@ -63,63 +70,94 @@ uv run art init --check    # exits 1 if required items are missing
 
 ## Configuration
 
+There are two ways to configure what gets launched:
+
+### Option 1: Session YAML file (recommended for new setups)
+
+Pass a session file with `--file`. Each session group defines a name,
+instance count, GPU type, and command. No role semantics — the infra layer
+just provisions what you describe.
+
+See [`sessions.example.yaml`](sessions.example.yaml) for a documented example.
+
+| Key | Description |
+|-----|-------------|
+| `teamspace` | Lightning AI teamspace (falls back to global config) |
+| `org` | Lightning AI org (falls back to global config) |
+| `sessions[].name` | Group name — instances named `{name}-0`, `{name}-1`, … |
+| `sessions[].count` | Number of instances in the group |
+| `sessions[].gpu_type` | `H100` / `A100` / `A10G` / `L4` / `CPU` |
+| `sessions[].command` | Command to run (supports `{i}` for instance index) |
+| `launch.stagger_seconds` | Delay between Studio launches |
+| `launch.run_setup` | Run `studio_setup.sh` on each Studio |
+
+### Option 2: Legacy config (runners + reviewer)
+
 All tunables live in [`config.yaml`](config.yaml):
 
 | Key | Description | Default |
 |-----|-------------|---------|
 | `teamspace` | Lightning AI teamspace name | `chartsoo` |
 | `org` | Lightning AI org (leave empty to auto-detect) | `""` |
-| `repo_url` | Git repo cloned during studio setup | `codyhartsook/autoresearch-team` |
-| `repo_branch` | Branch to clone | `main` |
-| `coordination_repo.url` | Repo runners push/pull to for coordination | `codyhartsook/autoresearch-team` |
 | `runners.count` | Number of GPU runner Studios | `3` |
 | `runners.gpu_type` | GPU type per runner | `H100` |
+| `runners.command` | Command to run in each runner Studio | placeholder |
 | `reviewer.enabled` | Whether to launch a reviewer | `true` |
 | `reviewer.gpu_type` | Reviewer machine type | `CPU` |
 | `launch.stagger_seconds` | Delay between Studio launches | `5` |
 | `launch.run_setup` | Run `studio_setup.sh` on each Studio | `true` |
 
+Repo URLs and coordination details are **not** in this config — they're
+passed via environment variables (`ART_TEAM_REPO`, `ART_AUTORESEARCH_REPO`,
+etc.). See [`../PROVIDER_CONTRACT.md`](../PROVIDER_CONTRACT.md) for the
+separation between infra and architecture concerns.
+
 ### CLI Overrides
 
-Override config values directly from the command line:
-
 ```bash
-# Launch 1 runner on an A10G (cheaper for testing)
+# Launch from a session file
+uv run art launch --file sessions.yaml
+
+# Launch from a session file (dry run)
+uv run art launch --file sessions.yaml --dry-run
+
+# Legacy: launch 1 runner on an A10G (cheaper for testing)
 uv run art launch --mode runners --runners 1 --gpu A10G
 
-# Launch only the reviewer
+# Legacy: launch only the reviewer
 uv run art launch --mode reviewer
 
-# Use a custom config file
+# Use a custom global config file
 uv run art --config my-config.yaml launch
 ```
 
-## Architecture
+## Role in the stack
 
-This infrastructure layer implements the "no rounds or barriers" design from
-[`architecture.md`](../../architecture.md). Each runner and the reviewer is an
-independent, long-running Lightning Studio — **not** a Pipeline step.
+This is a **provider adapter** — it satisfies the infrastructure contract
+defined in [`../PROVIDER_CONTRACT.md`](../PROVIDER_CONTRACT.md) using
+Lightning AI Studios. It provisions sessions, runs commands, and tears down.
+It has no knowledge of the protocol, experiment loop, or coordination logic.
+
+See [`architecture.md`](../../architecture.md) § Infrastructure for how this
+layer fits into the overall system.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Lightning Teamspace                       │
+│                    Lightning Teamspace                      │
 │                                                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐ │
-│  │ runner-0 │  │ runner-1 │  │ runner-2 │  │  reviewer   │ │
-│  │  (H100)  │  │  (H100)  │  │  (H100)  │  │   (CPU)    │ │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬──────┘ │
-│       │              │              │              │        │
-│       └──────────────┴──────┬───────┴──────────────┘        │
-│                             │                               │
-│                      Git (remote repo)                      │
-│              (shared knowledge store)                        │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐         │
+│  │ gpu-worker-0 │ │ gpu-worker-1 │ │ gpu-worker-2 │  ...    │
+│  │    (H100)    │ │    (H100)    │ │    (H100)    │         │
+│  └──────────────┘ └──────────────┘ └──────────────┘         │
+│  ┌──────────────┐                                           │
+│  │ cpu-worker-0 │   Session groups are defined in YAML.     │
+│  │    (CPU)     │   The infra layer assigns no roles.       │
+│  └──────────────┘                                           │
 │                                                             │
+│  Each Studio is independent — no shared filesystem, no      │
+│  inter-session communication through the provider.          │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-Studios coordinate through git — each runner clones the shared repo, works
-on branches, and pushes results. The reviewer fetches and reads across
-branches. No shared filesystem required.
 
 ## Files
 
@@ -131,7 +169,8 @@ branches. No shared filesystem required.
 | `teardown.py` | Graceful shutdown / deletion |
 | `health_check.py` | Status monitor with rich tables |
 | `config.py` | Config loading, validation, override merging |
-| `config.yaml` | Central configuration |
+| `config.yaml` | Legacy configuration (runners + reviewer) |
+| `sessions.example.yaml` | Example session YAML for `--file` path |
 | `studio_setup.sh` | Environment provisioning (runs inside each Studio) |
 
 ## Testing
@@ -193,11 +232,14 @@ The suite creates **two CPU Studios** with unique names (`e2etest-{uuid}-0`,
 `e2etest-{uuid}-1`) at session scope, runs all tests, then deletes both
 Studios — even if tests fail or are interrupted.
 
-| Module | Tests | What it validates |
-|--------|-------|-------------------|
-| `test_studio_lifecycle.py` | 8 | Studios reach Running status, echo commands work, exit codes propagate, git is available |
-| `test_git_coordination.py` | 8 | Both Studios clone same remote, A pushes branch → B fetches it, incremental commits via pull, JSON payload round-trip |
+| Module | Tests | What it validates (provider contract) |
+|--------|-------|---------------------------------------|
+| `test_studio_lifecycle.py` | 8 | Sessions start, commands execute, exit codes propagate, git available |
+| `test_git_coordination.py` | 6 | Network access (clone scripts), credential injection (push/fetch scripts) |
 | `test_run_script.py` | 3 | Multi-line bash+python scripts, nonzero exit detection |
+
+Tests are written as **opaque scripts** — the infra layer runs them without
+knowing what they do internally.  This keeps tests provider-agnostic.
 
 ### Test config
 

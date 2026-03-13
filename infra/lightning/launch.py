@@ -8,6 +8,7 @@ architecture's "no rounds or barriers" principle.
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-from infra.lightning.config import studio_kwargs
+from infra.lightning.config import session_specs, studio_kwargs
 
 console = Console()
 
@@ -152,12 +153,17 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
     run_setup = cfg.get("launch", {}).get("run_setup", True)
     setup_script_raw = _SETUP_SCRIPT.read_text() if run_setup and _SETUP_SCRIPT.exists() else None
 
-    # Inject config values as env vars so studio_setup.sh can read them
+    # Inject env vars for studio_setup.sh.  Repo URLs come from env vars
+    # (set by the caller) with config fallbacks.  These are NOT provider
+    # concerns — the infra layer just passes them through.
     if setup_script_raw:
+        team_repo = os.environ.get("ART_TEAM_REPO", cfg.get("repo_url", ""))
+        team_branch = os.environ.get("ART_TEAM_BRANCH", cfg.get("repo_branch", "main"))
+        autoresearch_repo = os.environ.get("ART_AUTORESEARCH_REPO", cfg.get("autoresearch_repo_url", ""))
         env_prefix = (
-            f'export ART_TEAM_REPO="{cfg.get("repo_url", "")}"\n'
-            f'export ART_TEAM_BRANCH="{cfg.get("repo_branch", "main")}"\n'
-            f'export ART_AUTORESEARCH_REPO="{cfg.get("autoresearch_repo_url", "")}"\n'
+            f'export ART_TEAM_REPO="{team_repo}"\n'
+            f'export ART_TEAM_BRANCH="{team_branch}"\n'
+            f'export ART_AUTORESEARCH_REPO="{autoresearch_repo}"\n'
         )
         setup_script: str | None = env_prefix + setup_script_raw
     else:
@@ -218,6 +224,173 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
                 "All Studios launched successfully.\n\n"
                 "  • Run [bold]uv run art health[/bold] to check status.\n"
                 "  • Run [bold]uv run art teardown[/bold] to stop the fleet.",
+                title="[green]Next steps[/green]",
+                border_style="green",
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# Session-based launch (--file path)
+# ---------------------------------------------------------------------------
+
+
+def _session_config_panel(cfg: dict[str, Any], dry_run: bool) -> Panel:
+    """Build a rich Panel summarising a session-file launch configuration."""
+    groups = cfg.get("sessions", [])
+    lines = [
+        f"[bold]Teamspace:[/bold]  {cfg.get('teamspace', '(unset)')}",
+        f"[bold]Groups:[/bold]     {len(groups)}",
+    ]
+    for g in groups:
+        lines.append(f"  • [cyan]{g['name']}[/cyan]  ×{g['count']}  ({g['gpu_type']})")
+    lines.append(
+        f"[bold]Stagger:[/bold]    {cfg.get('launch', {}).get('stagger_seconds', 0)}s between launches"
+    )
+    title = (
+        "[bold yellow]DRY RUN — preview only[/bold yellow]"
+        if dry_run
+        else "[bold green]Launching sessions[/bold green]"
+    )
+    border_style = "yellow" if dry_run else "green"
+    return Panel("\n".join(lines), title=title, border_style=border_style)
+
+
+def _session_summary_table(results: list[dict[str, Any]]) -> Table:
+    """Build a rich Table summarising launched sessions."""
+    table = Table(title="Session Summary")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Machine", style="magenta")
+    table.add_column("Group", style="blue")
+    table.add_column("Status")
+    table.add_column("Command", style="dim", max_width=50)
+
+    for r in results:
+        status = r.get("status", "unknown")
+        if status == "running":
+            styled = "[bold green]running[/bold green]"
+        elif status == "starting":
+            styled = "[bold yellow]starting[/bold yellow]"
+        elif status == "dry-run":
+            styled = "[dim]dry-run[/dim]"
+        else:
+            styled = f"[bold red]{status}[/bold red]"
+
+        table.add_row(r["name"], r["gpu_type"], r["group"], styled, r["command"][:50])
+
+    return table
+
+
+def launch_sessions(cfg: dict[str, Any], *, dry_run: bool = False) -> None:
+    """Launch sessions defined in a session-file config.
+
+    Parameters
+    ----------
+    cfg : dict
+        Validated configuration (from :func:`config.load_session_config`).
+        Must contain a ``sessions`` list.
+    dry_run : bool
+        If *True*, display what would be launched without calling the SDK.
+    """
+    specs = session_specs(cfg)
+    if not specs:
+        console.print("[yellow]No sessions to launch.[/yellow]")
+        return
+
+    # ---- Config overview ----
+    console.print()
+    console.print(_session_config_panel(cfg, dry_run))
+    console.print()
+
+    # ---- Dry run: show table and exit ----
+    if dry_run:
+        results = [{**s, "status": "dry-run"} for s in specs]
+        console.print(_session_summary_table(results))
+        console.print()
+        console.print(
+            Panel(
+                "No Studios were launched.  Remove [bold]--dry-run[/bold] to launch for real.",
+                title="[yellow]Next steps[/yellow]",
+                border_style="yellow",
+            )
+        )
+        return
+
+    # ---- Real launch ----
+    stagger = cfg.get("launch", {}).get("stagger_seconds", 0)
+    run_setup = cfg.get("launch", {}).get("run_setup", True)
+    setup_script_raw = _SETUP_SCRIPT.read_text() if run_setup and _SETUP_SCRIPT.exists() else None
+
+    # Inject env vars for studio_setup.sh
+    if setup_script_raw:
+        team_repo = os.environ.get("ART_TEAM_REPO", cfg.get("repo_url", ""))
+        team_branch = os.environ.get("ART_TEAM_BRANCH", cfg.get("repo_branch", "main"))
+        autoresearch_repo = os.environ.get("ART_AUTORESEARCH_REPO", cfg.get("autoresearch_repo_url", ""))
+        env_prefix = (
+            f'export ART_TEAM_REPO="{team_repo}"\n'
+            f'export ART_TEAM_BRANCH="{team_branch}"\n'
+            f'export ART_AUTORESEARCH_REPO="{autoresearch_repo}"\n'
+        )
+        setup_script: str | None = env_prefix + setup_script_raw
+    else:
+        setup_script = None
+
+    results: list[dict[str, Any]] = []
+
+    try:
+        from lightning_sdk import Machine, Studio  # type: ignore[import-untyped]
+    except ImportError:
+        console.print(
+            "[bold red]Error:[/bold red] lightning-sdk is not installed.  "
+            "Run [bold]uv sync[/bold] first."
+        )
+        raise SystemExit(1)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        for idx, spec in enumerate(specs):
+            task_id = progress.add_task(f"Launching [cyan]{spec['name']}[/cyan]...")
+
+            try:
+                machine = getattr(Machine, MACHINE_MAP[spec["gpu_type"]])
+                studio = Studio(**studio_kwargs(cfg, spec["name"]))
+                studio.start(machine=machine)
+
+                if setup_script:
+                    progress.update(task_id, description=f"Setting up [cyan]{spec['name']}[/cyan]...")
+                    studio.run(setup_script)
+
+                progress.update(task_id, description=f"Running command on [cyan]{spec['name']}[/cyan]...")
+                studio.run(spec["command"])
+
+                results.append({**spec, "status": "running"})
+            except Exception as exc:
+                results.append({**spec, "status": f"failed: {exc}"})
+                console.print(f"[red]  ✗ {spec['name']}: {exc}[/red]")
+
+            progress.remove_task(task_id)
+
+            # Stagger between launches (skip after last)
+            if stagger and idx < len(specs) - 1:
+                time.sleep(stagger)
+
+    # ---- Summary ----
+    console.print()
+    console.print(_session_summary_table(results))
+    console.print()
+
+    failed = [r for r in results if not r["status"].startswith("running")]
+    if failed:
+        console.print(f"[bold red]{len(failed)} session(s) failed to launch.[/bold red]")
+    else:
+        console.print(
+            Panel(
+                "All sessions launched successfully.\n\n"
+                "  • Run [bold]uv run art health[/bold] to check status.\n"
+                "  • Run [bold]uv run art teardown[/bold] to stop sessions.",
                 title="[green]Next steps[/green]",
                 border_style="green",
             )

@@ -1,0 +1,25 @@
+# Example session configuration for: art launch --file sessions.yaml
+#
+# Each session group defines a set of identical Studios.
+# The infra layer treats all sessions generically — no role semantics.
+#
+# Provider settings (teamspace, org) can be set here or omitted to fall
+# back to the global config.yaml values.
+
+teamspace: "chartsoo"
+org: ""
+
+sessions:
+  - name: "gpu-worker"
+    count: 3
+    gpu_type: "H100"
+    command: "echo 'Session gpu-worker-{i} started' && sleep infinity"
+
+  - name: "cpu-worker"
+    count: 1
+    gpu_type: "CPU"
+    command: "echo 'Session cpu-worker-{i} started' && sleep infinity"
+
+launch:
+  run_setup: true
+  stagger_seconds: 5
