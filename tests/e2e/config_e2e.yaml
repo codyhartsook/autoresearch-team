@@ -1,0 +1,46 @@
+# E2E test config — CPU Studios, 2 runners, no reviewer, no setup script.
+# Isolated from the production infra/lightning/config.yaml.
+
+teamspace: "chartsoo"
+org: ""                            # Lightning AI org — leave empty to auto-detect
+
+runners:
+  count: 2
+  gpu_type: "CPU"
+  studio_prefix: "e2etest-runner"
+  command: "echo 'E2E runner {runner_id} ready'"
+
+reviewer:
+  enabled: false
+  gpu_type: "CPU"
+  studio_name: "e2etest-reviewer"
+  command: "echo 'E2E reviewer ready'"
+
+# ---------------------------------------------------------------------------
+# Git coordination tests — uses a SEPARATE repo from production.
+#
+# In production, runners coordinate through the real autoresearch repo
+# (see coordination_repo in config.yaml).  For e2e tests we intentionally
+# use a throwaway repo so test branches don't pollute the real project.
+#
+# Two modes:
+#
+#   1. Auto-create (default, recommended for CI):
+#      Leave test_repo.url empty.  The test fixture creates a temporary
+#      private GitHub repo before the session and deletes it afterward.
+#      Requires GH_TOKEN with `repo` scope.
+#
+#   2. Existing repo:
+#      Set test_repo.url to a repo you own.  Test branches (e2e-*) are
+#      pushed during tests and cleaned up after each test.  Requires
+#      GH_TOKEN with push access.
+#
+# Override via env: E2E_TEST_REPO_URL=https://github.com/you/scratch.git
+# ---------------------------------------------------------------------------
+test_repo:
+  url: "https://github.com/codyhartsook/autoresearch-team-test-repo.git"
+  github_owner: "codyhartsook"     # GitHub user or org that owns created repos
+
+launch:
+  run_setup: false
+  stagger_seconds: 0
