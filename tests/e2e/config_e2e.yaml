@@ -1,0 +1,23 @@
+# E2E test config — CPU Studios, 2 runners, no reviewer, no setup script.
+# Isolated from the production infra/lightning/config.yaml.
+
+teamspace: "autoresearch-team"
+
+runners:
+  count: 2
+  gpu_type: "CPU"
+  studio_prefix: "e2etest-runner"
+  command: "echo 'E2E runner {runner_id} ready'"
+
+reviewer:
+  enabled: false
+  gpu_type: "CPU"
+  studio_name: "e2etest-reviewer"
+  command: "echo 'E2E reviewer ready'"
+
+shared_storage:
+  data_dir: "/teamspace/data"
+
+launch:
+  run_setup: false
+  stagger_seconds: 0
