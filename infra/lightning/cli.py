@@ -1,6 +1,6 @@
 """Autoresearch Team CLI — Lightning AI infrastructure management.
 
-Single entry point ``art`` with subcommands: init, launch, teardown, health.
+Single entry point ``art`` with subcommands: init, launch, teardown, health, logs.
 
 Usage::
 
@@ -8,6 +8,7 @@ Usage::
     art init --check          # non-interactive env check
     art launch --dry-run
     art health --watch
+    art logs --watch
     art teardown
 """
 
@@ -72,7 +73,7 @@ def init(ctx: click.Context, check: bool) -> None:
 @click.option("--runners", type=int, default=None, help="Override runner count.")
 @click.option(
     "--gpu",
-    type=click.Choice(["H100", "A100", "A10G", "L4"]),
+    type=click.Choice(["H100", "H200", "A100", "L40S", "L4", "T4"]),
     default=None,
     help="Override GPU type for runners.",
 )
@@ -131,3 +132,48 @@ def health(ctx: click.Context, watch: bool, interval: int) -> None:
     from infra.lightning.health_check import check_health
 
     check_health(_get_config(ctx), watch=watch, interval=interval)
+
+
+# ---------------------------------------------------------------------------
+# logs — pull telemetry from running Studios
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--file",
+    "session_file",
+    type=click.Path(exists=True),
+    default=None,
+    help="Session YAML file (to discover Studio names).",
+)
+@click.option("--name", default=None, help="Filter to a single Studio by name.")
+@click.option("--tail", "tail_n", type=int, default=10, help="Show last N events per Studio.")
+@click.option("--watch", is_flag=True, help="Continuously refresh.")
+@click.option("--interval", type=int, default=30, help="Watch refresh interval (seconds).")
+@click.pass_context
+def logs(
+    ctx: click.Context,
+    session_file: str | None,
+    name: str | None,
+    tail_n: int,
+    watch: bool,
+    interval: int,
+) -> None:
+    """Pull and display telemetry events from running Studios.
+
+    Reads metrics.jsonl from each Studio and displays a summary table.
+    Use --file to discover Studios from a session YAML, otherwise uses
+    the global config (runners + reviewer).
+    """
+    from infra.lightning.telemetry import show_logs
+
+    if session_file:
+        from infra.lightning.config import load_session_config
+
+        base_cfg = _get_config(ctx)
+        cfg = load_session_config(session_file, base_cfg=base_cfg)
+    else:
+        cfg = _get_config(ctx)
+
+    show_logs(cfg, studio_filter=name, tail_n=tail_n, watch=watch, interval=interval)

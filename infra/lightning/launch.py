@@ -27,9 +27,12 @@ console = Console()
 # fixes any SDK naming drift.
 MACHINE_MAP: dict[str, str] = {
     "H100": "H100",
+    "H200": "H200",
     "A100": "A100",
     "A10G": "A10G",
+    "L40S": "L40S",
     "L4": "L4",
+    "T4": "T4",
     "CPU": "CPU",
 }
 

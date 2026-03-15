@@ -1,0 +1,30 @@
+# Single-runner smoke test — prove autoresearch runs on a Lightning GPU Studio.
+#
+# Launches 1 L40S Studio, clones autoresearch, runs prepare.py + train.py,
+# and reports val_bpb. Total runtime: ~10-12 min.
+#
+# Usage:
+#   art launch --file sample-experiments/single-runner/sessions.yaml --dry-run
+#   art launch --file sample-experiments/single-runner/sessions.yaml
+#
+# Repo URLs below are used by studio_setup.sh (via launch.py env injection).
+# Override with env vars ART_TEAM_REPO / ART_AUTORESEARCH_REPO if needed.
+
+teamspace: "chartsoo"
+org: ""
+
+# Repo URLs — used by studio_setup.sh to clone inside each Studio.
+# These are config-level fallbacks; env vars take precedence.
+repo_url: "https://github.com/codyhartsook/autoresearch-team.git"
+repo_branch: "main"
+autoresearch_repo_url: "https://github.com/karpathy/autoresearch.git"
+
+sessions:
+  - name: "smoke-runner"
+    count: 1
+    gpu_type: "L40S"
+    command: "bash /teamspace/studios/this_studio/autoresearch-team/sample-experiments/single-runner/run_autoresearch.sh"
+
+launch:
+  run_setup: true           # Runs studio_setup.sh first (installs uv, clones repos)
+  stagger_seconds: 0

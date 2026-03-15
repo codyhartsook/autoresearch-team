@@ -12,7 +12,7 @@ org: ""                           # Lightning AI org that owns the teamspace (le
 
 runners:
   count: 3
-  gpu_type: "H100"               # H100 | A100 | A10G | L4
+  gpu_type: "L40S"               # H100 | H200 | A100 | L40S | L4 | T4
   studio_prefix: "runner"        # Studios named runner-0, runner-1, ...
   command: "echo 'Runner {runner_id} started' && sleep infinity"  # Placeholder — replaced by real runner command
 
