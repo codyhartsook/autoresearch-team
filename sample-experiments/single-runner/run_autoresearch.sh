@@ -133,25 +133,18 @@ echo ""
 write_event "training" "started"
 
 # Run training, tee to log, and emit periodic JSONL events for step-level metrics.
-# The awk script watches for lines containing "step" and numeric patterns,
-# emitting a telemetry event for each detected training step.
-uv run train.py 2>&1 | tee -a "${LOG_FILE}" | awk -v mf="${METRICS_FILE}" -v host="$(hostname)" '
-{
-    print  # always pass through to stdout
-
+# Uses a simple grep+sed pipeline instead of gawk capture groups for portability.
+uv run train.py 2>&1 | tee -a "${LOG_FILE}" | while IFS= read -r line; do
+    echo "${line}"
     # Detect step progress lines — autoresearch train.py prints lines like:
     #   step N | loss X.XXX | ...
-    # The exact format varies, so we look for common patterns.
-    if (match($0, /step[= ]+([0-9]+)/, step_m) && match($0, /loss[= :]+([0-9]+\.[0-9]+)/, loss_m)) {
-        step = step_m[1]
-        loss = loss_m[1]
-        cmd = "date -u +%Y-%m-%dT%H:%M:%SZ"
-        cmd | getline ts
-        close(cmd)
-        printf "{\"ts\": \"%s\", \"host\": \"%s\", \"phase\": \"training\", \"status\": \"running\", \"step\": \"%s\", \"loss\": \"%s\"}\n", ts, host, step, loss >> mf
-        fflush(mf)
-    }
-}'
+    # Extract step number and loss value using portable tools.
+    step=$(echo "${line}" | sed -n 's/.*step[= ]*\([0-9]*\).*/\1/p')
+    loss=$(echo "${line}" | sed -n 's/.*loss[= :]*\([0-9]*\.[0-9]*\).*/\1/p')
+    if [ -n "${step}" ] && [ -n "${loss}" ]; then
+        write_event "training" "running" "step=${step}" "loss=${loss}"
+    fi
+done
 
 echo ""
 echo "[OK] Training complete"
