@@ -16,7 +16,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from infra.lightning.config import studio_kwargs
+from infra.lightning.config import session_specs, studio_kwargs
 
 console = Console()
 
@@ -27,6 +27,20 @@ _STALE_THRESHOLD_SECONDS = 30 * 60  # 30 minutes
 def _studio_specs(cfg: dict[str, Any]) -> list[dict[str, str]]:
     """Return all Studios described by the config."""
     specs: list[dict[str, str]] = []
+
+    # Session-file path — cfg has a "sessions" key
+    if "sessions" in cfg:
+        for s in session_specs(cfg):
+            specs.append(
+                {
+                    "name": s["name"],
+                    "gpu_type": s["gpu_type"],
+                    "role": s["group"],
+                }
+            )
+        return specs
+
+    # Legacy path — runners + reviewer
     rcfg = cfg["runners"]
     vcfg = cfg["reviewer"]
 

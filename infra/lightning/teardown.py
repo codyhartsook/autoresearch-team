@@ -1,8 +1,8 @@
 """Graceful shutdown — stop or delete Lightning AI Studios.
 
-Supports selective teardown (runners only, reviewer only, or all) and
-an optional ``--delete`` flag that removes Studios entirely rather than
-just stopping them.
+Supports selective teardown (runners only, reviewer only, or all) for legacy
+configs, and full session-file teardown via ``--file``.  An optional
+``--delete`` flag removes Studios entirely rather than just stopping them.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm
 from rich.table import Table
 
-from infra.lightning.config import studio_kwargs
+from infra.lightning.config import session_specs, studio_kwargs
 
 console = Console()
 
@@ -23,6 +23,14 @@ console = Console()
 def _studio_names(cfg: dict[str, Any], mode: str) -> list[dict[str, str]]:
     """Return a list of ``{"name": ..., "role": ...}`` dicts to tear down."""
     studios: list[dict[str, str]] = []
+
+    # Session-file path — cfg has a "sessions" key
+    if "sessions" in cfg:
+        for spec in session_specs(cfg):
+            studios.append({"name": spec["name"], "role": spec["group"]})
+        return studios
+
+    # Legacy path — runners + reviewer
     rcfg = cfg["runners"]
     vcfg = cfg["reviewer"]
 

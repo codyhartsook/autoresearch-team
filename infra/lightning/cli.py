@@ -109,29 +109,67 @@ def launch(
 
 @cli.command()
 @click.option(
+    "--file",
+    "session_file",
+    type=click.Path(exists=True),
+    default=None,
+    help="Session YAML file (to discover Studio names).",
+)
+@click.option(
     "--mode",
     type=click.Choice(["all", "runners", "reviewer"]),
     default="all",
-    help="Which components to tear down.",
+    help="Which components to tear down (legacy config only).",
 )
 @click.option("--delete", is_flag=True, help="Remove Studios entirely, not just stop.")
 @click.pass_context
-def teardown(ctx: click.Context, mode: str, delete: bool) -> None:
-    """Stop or remove fleet Studios."""
+def teardown(ctx: click.Context, session_file: str | None, mode: str, delete: bool) -> None:
+    """Stop or remove fleet Studios.
+
+    Use --file to tear down Studios from a session YAML, otherwise uses
+    the global config (runners + reviewer).
+    """
     from infra.lightning.teardown import teardown_fleet
 
-    teardown_fleet(_get_config(ctx), mode=mode, delete=delete)
+    if session_file:
+        from infra.lightning.config import load_session_config
+
+        base_cfg = _get_config(ctx)
+        cfg = load_session_config(session_file, base_cfg=base_cfg)
+    else:
+        cfg = _get_config(ctx)
+
+    teardown_fleet(cfg, mode=mode, delete=delete)
 
 
 @cli.command()
+@click.option(
+    "--file",
+    "session_file",
+    type=click.Path(exists=True),
+    default=None,
+    help="Session YAML file (to discover Studio names).",
+)
 @click.option("--watch", is_flag=True, help="Continuously refresh status.")
 @click.option("--interval", type=int, default=30, help="Watch refresh interval (seconds).")
 @click.pass_context
-def health(ctx: click.Context, watch: bool, interval: int) -> None:
-    """Show fleet health status."""
+def health(ctx: click.Context, session_file: str | None, watch: bool, interval: int) -> None:
+    """Show fleet health status.
+
+    Use --file to check Studios from a session YAML, otherwise uses
+    the global config (runners + reviewer).
+    """
     from infra.lightning.health_check import check_health
 
-    check_health(_get_config(ctx), watch=watch, interval=interval)
+    if session_file:
+        from infra.lightning.config import load_session_config
+
+        base_cfg = _get_config(ctx)
+        cfg = load_session_config(session_file, base_cfg=base_cfg)
+    else:
+        cfg = _get_config(ctx)
+
+    check_health(cfg, watch=watch, interval=interval)
 
 
 # ---------------------------------------------------------------------------
