@@ -125,6 +125,18 @@ echo ""
 # 2. Training (5 min wall-clock budget)
 # ---------------------------------------------------------------
 CURRENT_PHASE="training"
+
+# The default DEVICE_BATCH_SIZE=128 in train.py OOMs on GPUs with <80GB VRAM.
+# Patch it to a safe value for the L40S (46GB). This uses sed to edit the
+# constant in-place — autoresearch uses top-level constants, not CLI args.
+# On H100 (80GB) this patch is unnecessary but harmless.
+VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1)
+if [ -n "${VRAM_MB}" ] && [ "${VRAM_MB}" -lt 65000 ]; then
+    echo "[INFO] GPU VRAM (${VRAM_MB} MiB) < 65 GiB — reducing DEVICE_BATCH_SIZE to 64"
+    sed -i 's/^DEVICE_BATCH_SIZE = 128/DEVICE_BATCH_SIZE = 64/' train.py
+    write_event "training" "patched" "DEVICE_BATCH_SIZE=64" "vram_mb=${VRAM_MB}"
+fi
+
 echo "[2/3] Running training (train.py — 5 min budget)..."
 echo "      Model: GPT with RoPE, Flash Attention 3, MuonAdamW optimizer"
 echo "      Metric: val_bpb (validation bits per byte — lower is better)"
