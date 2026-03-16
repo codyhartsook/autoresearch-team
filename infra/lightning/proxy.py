@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import select
 import shutil
 import signal
@@ -101,41 +102,33 @@ def _load_or_generate_secret() -> str:
     """Load an existing IROH_SECRET or generate a new one.
 
     The secret is stored at ``~/.art/dumbpipe-secret`` so tickets remain
-    stable across restarts.
+    stable across restarts.  dumbpipe accepts any string as IROH_SECRET —
+    we generate 32 random hex bytes.
     """
     if _SECRET_FILE.exists():
         secret = _SECRET_FILE.read_text().strip()
         if secret:
             return secret
 
-    # Generate a new secret via dumbpipe
-    _ensure_dumbpipe()
-    result = subprocess.run(
-        ["dumbpipe", "generate-secret"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to generate iroh secret: {result.stderr.strip()}")
-
-    secret = result.stdout.strip()
+    # Generate a random secret (dumbpipe has no generate-secret subcommand)
+    secret = secrets.token_hex(32)
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     _SECRET_FILE.write_text(secret + "\n")
     _SECRET_FILE.chmod(0o600)
     return secret
 
 
-def _generate_ticket(port: int, secret: str) -> str:
+def _generate_ticket(secret: str) -> str:
     """Pre-compute the dumbpipe ticket without starting a listener.
 
-    Uses ``dumbpipe generate-ticket --host localhost:<port>`` with the
-    given ``IROH_SECRET``.
+    Uses ``dumbpipe generate-ticket`` with the given ``IROH_SECRET``.
+    The ticket is endpoint-based (not host-specific) — it identifies the
+    listener by its iroh node ID derived from the secret.
     """
     _ensure_dumbpipe()
     env = {**os.environ, "IROH_SECRET": secret}
     result = subprocess.run(
-        ["dumbpipe", "generate-ticket", "--host", f"localhost:{port}"],
+        ["dumbpipe", "generate-ticket"],
         capture_output=True,
         text=True,
         env=env,
@@ -203,7 +196,7 @@ def proxy_start(
 
     # Pre-compute the ticket
     if secret:
-        ticket = _generate_ticket(port, secret)
+        ticket = _generate_ticket(secret)
     else:
         ticket = ""  # will be captured from stderr
 
