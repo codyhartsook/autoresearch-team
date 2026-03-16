@@ -39,6 +39,61 @@ MACHINE_MAP: dict[str, str] = {
 _SETUP_SCRIPT = Path(__file__).parent / "studio_setup.sh"
 
 
+def _proxy_env_prefix() -> str:
+    """Build shell lines that inject the dumbpipe tunnel connector.
+
+    If an active proxy is detected (via ``~/.art/proxy.json``), returns a
+    shell snippet that:
+      1. Sets ``ART_PROXY_TICKET`` so studio_setup.sh can start the connector.
+      2. Sets ``ART_PROXY_PORT`` so the connector knows which local port to bind.
+
+    Returns an empty string if no proxy is active.
+    """
+    from infra.lightning.proxy import get_active_proxy
+
+    proxy = get_active_proxy()
+    if not proxy:
+        return ""
+
+    ticket = proxy["ticket"]
+    port = proxy.get("port", 4445)
+
+    return (
+        f'export ART_PROXY_TICKET="{ticket}"\n'
+        f'export ART_PROXY_PORT="{port}"\n'
+    )
+
+
+def _tunnel_command_prefix(proxy_state: dict[str, Any] | None) -> str:
+    """Build a shell snippet that starts the dumbpipe connector before the main command.
+
+    Injected before the main command so the tunnel is established before
+    Claude Code (or any other tool) tries to reach the API.
+
+    Returns an empty string if no proxy is active.
+    """
+    if not proxy_state:
+        return ""
+
+    ticket = proxy_state["ticket"]
+    port = proxy_state.get("port", 4445)
+    auth_token = proxy_state.get("auth_token", "")
+
+    lines = [
+        "# --- dumbpipe tunnel to local LiteLLM proxy ---",
+        f'dumbpipe connect-tcp --addr localhost:{port} "{ticket}" &',
+        "DUMBPIPE_PID=$!",
+        "sleep 2  # let tunnel establish",
+        f'export ANTHROPIC_BASE_URL="http://localhost:{port}"',
+    ]
+    if auth_token:
+        lines.append(f'export ANTHROPIC_AUTH_TOKEN="{auth_token}"')
+    lines.append('trap "kill $DUMBPIPE_PID 2>/dev/null" EXIT')
+    lines.append("# --- end dumbpipe tunnel ---")
+
+    return "\n".join(lines) + "\n"
+
+
 def _studio_names(cfg: dict[str, Any], mode: str) -> list[dict[str, Any]]:
     """Build a list of dicts describing each Studio to launch."""
     studios: list[dict[str, Any]] = []
@@ -141,6 +196,20 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
     if dry_run:
         results = [{**s, "status": "dry-run"} for s in studios]
         console.print(_summary_table(results))
+
+        # Show proxy tunnel status in dry-run output
+        from infra.lightning.proxy import get_active_proxy
+
+        proxy_state = get_active_proxy()
+        if proxy_state:
+            console.print(
+                f"\n[cyan]Proxy active[/cyan] — Studios would tunnel to "
+                f"localhost:{proxy_state.get('port', 4445)}\n"
+                f"  Ticket: [dim]{proxy_state['ticket'][:60]}...[/dim]"
+            )
+        else:
+            console.print("\n[dim]No proxy active — Studios will not get a tunnel.[/dim]")
+
         console.print()
         console.print(
             Panel(
@@ -168,9 +237,23 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
             f'export ART_TEAM_BRANCH="{team_branch}"\n'
             f'export ART_AUTORESEARCH_REPO="{autoresearch_repo}"\n'
         )
+        # Inject proxy tunnel env vars if a proxy is active
+        env_prefix += _proxy_env_prefix()
         setup_script: str | None = env_prefix + setup_script_raw
     else:
         setup_script = None
+
+    # Check for active proxy — tunnel connector is prepended to the main command
+    from infra.lightning.proxy import get_active_proxy
+
+    proxy_state = get_active_proxy()
+    tunnel_prefix = _tunnel_command_prefix(proxy_state)
+    if proxy_state:
+        console.print(
+            f"[cyan]Proxy detected[/cyan] — tunnel will connect Studios to "
+            f"localhost:{proxy_state.get('port', 4445)}"
+        )
+
     results: list[dict[str, Any]] = []
 
     try:
@@ -200,7 +283,7 @@ def launch_fleet(cfg: dict[str, Any], *, mode: str = "all", dry_run: bool = Fals
                     studio.run(setup_script)
 
                 progress.update(task_id, description=f"Running command on [cyan]{spec['name']}[/cyan]...")
-                studio.run(spec["command"])
+                studio.run(tunnel_prefix + spec["command"])
 
                 results.append({**spec, "status": "running"})
             except Exception as exc:
@@ -309,6 +392,20 @@ def launch_sessions(cfg: dict[str, Any], *, dry_run: bool = False) -> None:
     if dry_run:
         results = [{**s, "status": "dry-run"} for s in specs]
         console.print(_session_summary_table(results))
+
+        # Show proxy tunnel status in dry-run output
+        from infra.lightning.proxy import get_active_proxy
+
+        proxy_state = get_active_proxy()
+        if proxy_state:
+            console.print(
+                f"\n[cyan]Proxy active[/cyan] — Studios would tunnel to "
+                f"localhost:{proxy_state.get('port', 4445)}\n"
+                f"  Ticket: [dim]{proxy_state['ticket'][:60]}...[/dim]"
+            )
+        else:
+            console.print("\n[dim]No proxy active — Studios will not get a tunnel.[/dim]")
+
         console.print()
         console.print(
             Panel(
@@ -334,9 +431,22 @@ def launch_sessions(cfg: dict[str, Any], *, dry_run: bool = False) -> None:
             f'export ART_TEAM_BRANCH="{team_branch}"\n'
             f'export ART_AUTORESEARCH_REPO="{autoresearch_repo}"\n'
         )
+        # Inject proxy tunnel env vars if a proxy is active
+        env_prefix += _proxy_env_prefix()
         setup_script: str | None = env_prefix + setup_script_raw
     else:
         setup_script = None
+
+    # Check for active proxy — tunnel connector is prepended to the main command
+    from infra.lightning.proxy import get_active_proxy
+
+    proxy_state = get_active_proxy()
+    tunnel_prefix = _tunnel_command_prefix(proxy_state)
+    if proxy_state:
+        console.print(
+            f"[cyan]Proxy detected[/cyan] — tunnel will connect Studios to "
+            f"localhost:{proxy_state.get('port', 4445)}"
+        )
 
     results: list[dict[str, Any]] = []
 
@@ -367,7 +477,7 @@ def launch_sessions(cfg: dict[str, Any], *, dry_run: bool = False) -> None:
                     studio.run(setup_script)
 
                 progress.update(task_id, description=f"Running command on [cyan]{spec['name']}[/cyan]...")
-                studio.run(spec["command"])
+                studio.run(tunnel_prefix + spec["command"])
 
                 results.append({**spec, "status": "running"})
             except Exception as exc:

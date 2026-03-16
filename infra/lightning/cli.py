@@ -1,6 +1,7 @@
 """Autoresearch Team CLI — Lightning AI infrastructure management.
 
-Single entry point ``art`` with subcommands: init, launch, teardown, health, logs.
+Single entry point ``art`` with subcommands: init, launch, teardown, health,
+logs, proxy.
 
 Usage::
 
@@ -10,6 +11,10 @@ Usage::
     art health --watch
     art logs --watch
     art teardown
+    art proxy start           # start dumbpipe tunnel for LiteLLM proxy
+    art proxy start --auth-token TOKEN  # with explicit proxy auth token
+    art proxy stop
+    art proxy status
 """
 
 from __future__ import annotations
@@ -215,3 +220,44 @@ def logs(
         cfg = _get_config(ctx)
 
     show_logs(cfg, studio_filter=name, tail_n=tail_n, watch=watch, interval=interval)
+
+
+# ---------------------------------------------------------------------------
+# proxy — manage dumbpipe tunnel for LiteLLM proxy access from Studios
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def proxy() -> None:
+    """Manage dumbpipe tunnel for LiteLLM proxy access from Studios.
+
+    Tunnels your local LiteLLM proxy into remote Studios so Claude Code
+    agents can reach the Anthropic API without exposing a public URL.
+    """
+
+
+@proxy.command()
+@click.option("--port", type=int, default=4445, show_default=True, help="Local port where LiteLLM proxy is running.")
+@click.option("--no-secret", is_flag=True, help="Don't use a stable IROH_SECRET (ticket changes every restart).")
+@click.option("--auth-token", default=None, help="Proxy auth token (ANTHROPIC_AUTH_TOKEN). Falls back to env var.")
+def start(port: int, no_secret: bool, auth_token: str | None) -> None:
+    """Start the dumbpipe listener to tunnel your local LiteLLM proxy."""
+    from infra.lightning.proxy import proxy_start
+
+    proxy_start(port=port, use_secret=not no_secret, auth_token=auth_token)
+
+
+@proxy.command()
+def stop() -> None:
+    """Stop the running dumbpipe proxy listener."""
+    from infra.lightning.proxy import proxy_stop
+
+    proxy_stop()
+
+
+@proxy.command()
+def status() -> None:
+    """Show current proxy tunnel status."""
+    from infra.lightning.proxy import proxy_status
+
+    proxy_status()

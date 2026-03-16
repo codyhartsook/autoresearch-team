@@ -64,6 +64,26 @@ art teardown
 art teardown --delete
 ```
 
+### Proxy tunnel (LiteLLM access from Studios)
+
+If you run a LiteLLM proxy locally, `art proxy` creates a dumbpipe tunnel so
+remote Studios can reach it without a public URL:
+
+```bash
+# Start the tunnel (reads ANTHROPIC_AUTH_TOKEN from env, or pass explicitly)
+art proxy start
+art proxy start --port 4445 --auth-token sk-my-proxy-token
+
+# Check tunnel status
+art proxy status
+
+# Studios launched while the proxy is active get the tunnel automatically
+art launch --file sessions.example.yaml
+
+# Stop the tunnel
+art proxy stop
+```
+
 ## Setup Wizard
 
 Run `art init` before your first launch. The wizard checks for:
@@ -183,6 +203,7 @@ layer fits into the overall system.
 | `cli.py` | Click CLI group — the `art` entry point |
 | `init_wizard.py` | Setup wizard — credential & tool checks, .env writer |
 | `launch.py` | Studio launch logic with rich progress output |
+| `proxy.py` | Proxy tunnel management — dumbpipe listener start/stop/status |
 | `teardown.py` | Graceful shutdown / deletion |
 | `health_check.py` | Status monitor with rich tables |
 | `config.py` | Config loading, validation, override merging |
@@ -287,8 +308,5 @@ Lightning AI dashboard or `art teardown`.
    finishes? For long-running commands (the experiment loop), we may need
    `nohup` / `tmux` wrapping.
 
-2. **API key propagation** — How `ANTHROPIC_API_KEY` reaches each Studio.
-   Options: teamspace secrets, `Studio.set_env()`, manual `export`.
-
-3. **Machine enum values** — Exact `lightning_sdk.Machine.H100` names. These
+2. **Machine enum values** — Exact `lightning_sdk.Machine.H100` names. These
    are isolated behind `MACHINE_MAP` in `launch.py` for easy updates.

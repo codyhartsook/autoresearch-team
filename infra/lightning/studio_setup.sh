@@ -10,6 +10,10 @@
 #   ART_TEAM_BRANCH     — branch to clone (default: main)
 #   ART_AUTORESEARCH_REPO — karpathy/autoresearch repo URL
 #
+# Optional env vars (set by launch.py when `art proxy` is active):
+#   ART_PROXY_TICKET    — dumbpipe ticket for proxy tunnel (triggers dumbpipe install)
+#   ART_PROXY_PORT      — local port for the proxy tunnel (default: 4445)
+#
 # Usage:  bash studio_setup.sh
 # ---------------------------------------------------------------
 set -euo pipefail
@@ -53,7 +57,25 @@ else
 fi
 
 # ---------------------------------------------------------------
-# 3. Clone autoresearch-team repo (skip if present)
+# 3. Install dumbpipe (skip if present)
+# ---------------------------------------------------------------
+if command -v dumbpipe &>/dev/null; then
+    echo "[✓] dumbpipe already installed"
+else
+    if [ -n "${ART_PROXY_TICKET:-}" ]; then
+        echo "[…] Installing dumbpipe (proxy tunnel requested)..."
+        DUMBPIPE_VERSION="0.34.0"
+        curl -fsSL "https://github.com/n0-computer/dumbpipe/releases/download/v${DUMBPIPE_VERSION}/dumbpipe-v${DUMBPIPE_VERSION}-linux-x86_64.tar.gz" \
+            | tar xz -C /usr/local/bin/ dumbpipe
+        chmod +x /usr/local/bin/dumbpipe
+        echo "[✓] dumbpipe installed"
+    else
+        echo "[…] dumbpipe not installed (no proxy tunnel requested)"
+    fi
+fi
+
+# ---------------------------------------------------------------
+# 4. Clone autoresearch-team repo (skip if present)
 # ---------------------------------------------------------------
 TEAM_DIR="${WORKSPACE}/autoresearch-team"
 if [ -d "${TEAM_DIR}/.git" ]; then
@@ -72,7 +94,7 @@ uv sync
 echo "[✓] autoresearch-team deps synced"
 
 # ---------------------------------------------------------------
-# 4. Clone karpathy/autoresearch repo (skip if present)
+# 5. Clone karpathy/autoresearch repo (skip if present)
 # ---------------------------------------------------------------
 AUTORESEARCH_DIR="${WORKSPACE}/autoresearch"
 if [ -d "${AUTORESEARCH_DIR}/.git" ]; then
