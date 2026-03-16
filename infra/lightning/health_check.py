@@ -66,14 +66,24 @@ def _studio_specs(cfg: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def _status_badge(status: str) -> str:
-    """Return a rich-markup badge for a Studio status string."""
+    """Return a rich-markup badge for a Studio status string.
+
+    Handles Lightning SDK Status enum values: NotCreated, Pending, Running,
+    Stopping, Stopped, Completed, Failed.
+    """
     s = status.lower()
     if s in ("running", "active"):
         return "[bold green]running[/bold green]"
     if s in ("pending", "starting"):
-        return "[bold yellow]starting[/bold yellow]"
-    if s in ("stopped", "shutting_down", "not_found"):
+        return "[bold yellow]pending[/bold yellow]"
+    if s in ("stopping",):
+        return "[bold yellow]stopping[/bold yellow]"
+    if s in ("stopped", "not_found", "notcreated"):
         return "[bold red]stopped[/bold red]"
+    if s == "completed":
+        return "[green]completed[/green]"
+    if s == "failed":
+        return "[bold red]failed[/bold red]"
     if s == "stale":
         return "[bold yellow]stale[/bold yellow]"
     return f"[dim]{status}[/dim]"

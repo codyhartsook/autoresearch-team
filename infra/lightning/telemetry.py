@@ -58,47 +58,80 @@ def parse_events(raw: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+class FetchResult:
+    """Result of fetching telemetry from a Studio.
+
+    Attributes
+    ----------
+    events : list[dict]
+        Parsed JSONL events (empty if unavailable).
+    status : str
+        Studio status at the time of the fetch (e.g. "Running", "Stopped").
+    error : str | None
+        Short error description if the fetch failed.
+    """
+
+    def __init__(
+        self,
+        events: list[dict[str, Any]] | None = None,
+        status: str = "unknown",
+        error: str | None = None,
+    ) -> None:
+        self.events = events or []
+        self.status = status
+        self.error = error
+
+
 def fetch_events(
     cfg: dict[str, Any],
     studio_name: str,
     remote_path: str = REMOTE_METRICS_PATH,
-) -> list[dict[str, Any]]:
+) -> FetchResult:
     """Download metrics.jsonl from a Studio and return parsed events.
 
     Tries ``studio.download_file()`` first.  Falls back to
     ``studio.run("cat ...")`` if the download method fails (e.g. the SDK
     version doesn't support it cleanly for the file type).
 
-    Returns an empty list on any error — Studio not running, file doesn't
-    exist yet, SDK not installed, etc.
+    Returns a :class:`FetchResult` with the Studio's status and any events.
+    Both strategies require the Studio to be running — if it's stopped,
+    the result will contain zero events and ``status="Stopped"``.
     """
     try:
         from lightning_sdk import Studio  # type: ignore[import-untyped]
     except ImportError:
-        return []
+        return FetchResult(status="sdk-missing", error="lightning-sdk not installed")
 
     try:
         studio = Studio(**studio_kwargs(cfg, studio_name))
-    except Exception:
-        return []
+    except Exception as exc:
+        return FetchResult(status="error", error=f"connect: {exc}")
+
+    studio_status = str(getattr(studio, "status", "unknown"))
+
+    # Can't fetch files from a stopped Studio
+    if studio_status.lower() in ("stopped", "notcreated", "stopping", "failed"):
+        return FetchResult(status=studio_status, error="Studio not running")
 
     # Strategy 1: download_file to a temp path
+    tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp:
             tmp_path = tmp.name
         studio.download_file(remote_path, tmp_path)
         raw = Path(tmp_path).read_text()
         Path(tmp_path).unlink(missing_ok=True)
-        return parse_events(raw)
+        return FetchResult(events=parse_events(raw), status=studio_status)
     except Exception:
-        Path(tmp_path).unlink(missing_ok=True)
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
 
     # Strategy 2: cat via run()
     try:
         raw = studio.run(f"cat {remote_path} 2>/dev/null || true")
-        return parse_events(raw)
-    except Exception:
-        return []
+        return FetchResult(events=parse_events(raw), status=studio_status)
+    except Exception as exc:
+        return FetchResult(status=studio_status, error=f"fetch: {exc}")
 
 
 def fetch_latest(
@@ -107,8 +140,8 @@ def fetch_latest(
     remote_path: str = REMOTE_METRICS_PATH,
 ) -> dict[str, Any] | None:
     """Return the most recent event from a Studio, or ``None``."""
-    events = fetch_events(cfg, studio_name, remote_path)
-    return events[-1] if events else None
+    result = fetch_events(cfg, studio_name, remote_path)
+    return result.events[-1] if result.events else None
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +181,7 @@ def fetch_all_studios(
     cfg: dict[str, Any],
     remote_path: str = REMOTE_METRICS_PATH,
     studio_filter: str | None = None,
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, FetchResult]:
     """Fetch events from all Studios described by the config.
 
     Parameters
@@ -162,15 +195,15 @@ def fetch_all_studios(
 
     Returns
     -------
-    dict[str, list[dict]]
-        Mapping of studio name → list of parsed events.
+    dict[str, FetchResult]
+        Mapping of studio name → FetchResult with events and status.
     """
     names = _studio_names_from_config(cfg)
 
     if studio_filter:
         names = [n for n in names if n == studio_filter]
 
-    result: dict[str, list[dict[str, Any]]] = {}
+    result: dict[str, FetchResult] = {}
     for name in names:
         result[name] = fetch_events(cfg, name, remote_path)
 
@@ -197,7 +230,7 @@ def _status_style(status: str) -> str:
 
 
 def _build_logs_table(
-    all_events: dict[str, list[dict[str, Any]]],
+    all_results: dict[str, FetchResult],
     tail_n: int = 10,
 ) -> Table:
     """Build a Rich Table showing the latest events from each Studio."""
@@ -217,11 +250,19 @@ def _build_logs_table(
     table.add_column("VRAM", style="dim", no_wrap=True)
     table.add_column("Info", style="dim", max_width=30, overflow="ellipsis")
 
-    for studio_name, events in all_events.items():
+    for studio_name, result in all_results.items():
+        events = result.events
+
         if not events:
+            # Show why there are no events
+            if result.error:
+                reason = f"[dim]{result.error}[/dim]"
+            else:
+                reason = "[dim]no events[/dim]"
+            status_display = f"[dim]({result.status})[/dim]" if result.status != "unknown" else ""
             table.add_row(
-                studio_name, "-", "-", "[dim]no events[/dim]",
-                "-", "-", "-", "-", "-",
+                studio_name, "-", "-", reason,
+                "-", "-", "-", "-", status_display,
             )
             continue
 
@@ -296,33 +337,41 @@ def show_logs(
             )
         )
         try:
-            all_events = fetch_all_studios(cfg, studio_filter=studio_filter)
+            all_results = fetch_all_studios(cfg, studio_filter=studio_filter)
             with Live(
-                _build_logs_table(all_events, tail_n),
+                _build_logs_table(all_results, tail_n),
                 console=console,
                 refresh_per_second=0.5,
             ) as live:
                 while True:
                     time.sleep(interval)
-                    all_events = fetch_all_studios(cfg, studio_filter=studio_filter)
-                    live.update(_build_logs_table(all_events, tail_n))
+                    all_results = fetch_all_studios(cfg, studio_filter=studio_filter)
+                    live.update(_build_logs_table(all_results, tail_n))
         except KeyboardInterrupt:
             console.print("\n[dim]Watch stopped.[/dim]")
     else:
-        all_events = fetch_all_studios(cfg, studio_filter=studio_filter)
-        console.print(_build_logs_table(all_events, tail_n))
+        all_results = fetch_all_studios(cfg, studio_filter=studio_filter)
+        console.print(_build_logs_table(all_results, tail_n))
         console.print()
 
-        total = sum(len(evts) for evts in all_events.values())
+        total = sum(len(r.events) for r in all_results.values())
+        stopped = [n for n, r in all_results.items() if r.status.lower() == "stopped"]
         if total == 0:
-            console.print(
-                "[yellow]No telemetry events found.  Studios may not be running yet, "
-                "or the run script hasn't started writing metrics.jsonl.[/yellow]"
-            )
+            if stopped:
+                console.print(
+                    f"[yellow]No telemetry events found.  "
+                    f"{len(stopped)} Studio(s) stopped — "
+                    f"telemetry can only be fetched from running Studios.[/yellow]"
+                )
+            else:
+                console.print(
+                    "[yellow]No telemetry events found.  Studios may not be running yet, "
+                    "or the run script hasn't started writing metrics.jsonl.[/yellow]"
+                )
         else:
             console.print(
                 f"[dim]Showing last {tail_n} events per Studio "
-                f"({total} total events across {len(all_events)} Studio(s)).[/dim]"
+                f"({total} total events across {len(all_results)} Studio(s)).[/dim]"
             )
         console.print(
             "[dim]Tip: run [bold]art logs --watch[/bold] for continuous monitoring.[/dim]"
