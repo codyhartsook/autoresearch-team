@@ -149,4 +149,4 @@ def teardown_fleet(cfg: dict[str, Any], *, mode: str = "all", delete: bool = Fal
     if failed:
         console.print(f"[bold red]{len(failed)} Studio(s) failed to {action_verb}.[/bold red]")
     else:
-        console.print(f"[green]All {len(results)} Studio(s) {action_verb}ped successfully.[/green]")
+        console.print(f"[green]All {len(results)} Studio(s) {action_verb}d successfully.[/green]")
